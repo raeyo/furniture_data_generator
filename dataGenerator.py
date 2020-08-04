@@ -162,7 +162,8 @@ if __name__ =="__main__":
     streamHandler = logging.StreamHandler()
     streamHandler.setFormatter(formatter)
     logger.addHandler(streamHandler)
-    logger.setLevel(level=logging.INFO)
+    # logger.setLevel(level=logging.INFO)
+    logger.setLevel(level=logging.DEBUG)
     
 
     save_dir = "SIM_dataset_v" + str(args.dataset_ver)
