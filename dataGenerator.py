@@ -127,7 +127,7 @@ class Generator(object):
         self.env.reset(assembly_num, furniture_num)
         for i in range(self.ep_length):
             self.env.step()
-            # self.env.test_step()
+            # self.env.test_step(assembly_num, furniture_num)
             self.save_image()
             # self.env.camera_test()
             self.logger.info(f"successfully saved image: {self.img_name}")
@@ -150,10 +150,10 @@ if __name__ =="__main__":
     parser.add_argument("--max_fn_num", type=int, default=2, help="maximum furniture number per scene")
     parser.add_argument("--max_img_num", type=int, default=10000, help="maximum image number")
     parser.add_argument("--ep_length", type=int, default=5, help="number of episode")
-    parser.add_argument("--save_root", type=str, default="/SSD1/joo/Dataset/furniture", help="saving directory root")
-    # parser.add_argument("--save_root", type=str, default="/home/raeyo/data_set", help="saving directory root")
+    # parser.add_argument("--save_root", type=str, default="/SSD1/joo/Dataset/furniture", help="saving directory root")
+    parser.add_argument("--save_root", type=str, default="/home/raeyo/data_set", help="saving directory root")
     
-    parser.add_argument("--dataset_ver", type=int, default=13, help="saving directory")
+    parser.add_argument("--dataset_ver", type=int, default=14, help="saving directory")
     args = parser.parse_args()
 
     # logger

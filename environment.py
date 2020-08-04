@@ -46,7 +46,7 @@ class DREnv(object):
         self.pr = PyRep()
 
         self.logger.info(f"Dataset version is {dataset_ver}")
-        if dataset_ver == 0:
+        if dataset_ver == 14:
             # light randomize config
             self._max_n_light = 3 # the number of point lights 2 ~ 3
             # camera randomize config
@@ -66,28 +66,10 @@ class DREnv(object):
             # furniture texture color reference
             self._fn_color = [0.9, 0.9, 0.9] # white
             self._wood_color = [0.9, 0.7, 0.5]
-        elif dataset_ver ==  1:
-            # light randomize config
-            self._max_n_light = 3 # the number of point lights 2 ~ 3
-            # camera randomize config
-            self._camera_range = [(0.5, -0.2, 1.5), (1.0, 0.2, 1.8)] # relative to Table_top
-            self.camera_type = 'zivid_ML'
-            # workspace config
-            self._workspace_range = [(-0.3, -0.3), (0.4, 0.3)] # furniture (x, y) value based on self.workspace
-            self._table_distractor_range = [(-0.6, -0.5), (0.6, 0.5)] # distractor (x, y) value based on self.workspace
-            self._light_range = [(-4, -4), (4, 4)]
-            # robot number
-            self._robot_num = 1
-            #TODO: stochastic config
-            self._fn_occ = 0.5
-            self._fn_flip_val = 0.5
-            self._robot_randomize_val = 0 # np.random.rand() > self._robot_randomize_val: -> pass
-            self._distractor_outer = 0.7
-            # furniture texture color reference
-            self._fn_color = [0.9, 0.9, 0.9] # white
 
         else:
             print("error")
+            exit()
             
         # static scene
         self.scene = "./scene/assembly_env_ZVID"
@@ -455,11 +437,19 @@ class DREnv(object):
         self.pr.step()
         self.logger.info("End to reset scene")
 
-    def test_step(self):
-        self.camera_manager.reset()
-        self._randomize_table()
-        self._randomize_camera()
-        self.pr.step()
+    def test_step(self, assembly_num, furniture_num):
+        self.texture_manager.reset()
+        self._sample_furnitures(assembly_num, furniture_num)
+        if np.random.rand() < self._fn_occ and len(self.scene_furniture) > 1:
+            self._is_occ = True
+        else:
+            self._is_occ = False
+        count = 0
+        for i in range(100):
+            if count % 10 == 0:
+                self._randomize_furniture()
+            self.pr.step()
+            count += 1
         
     def camera_test(self):
         defalut_view_point = self.workspace
@@ -708,12 +698,9 @@ class AssemblePart(object):
         bbox.set_orientation([0, 0, 0], relative_to=self.respondable)
         bbox.set_renderable(False)
         bbox.set_detectable(False)
-        
 
         return bbox
         
-
-
     def set_rotation_axis(self, height, rot_axis):
         self.height = height
         self.rot_axis = rot_axis
@@ -752,7 +739,7 @@ class AssemblePart(object):
         return sub_parts
 
     def _catch_fn_parts(self, furnitures):
-        #TODO: pose는 000000 이면 안됨
+        #TODO: pose는 0000000 이면 안됨
 
         self.used_fn = []
         for part, pt_name in self.sub_parts:
@@ -792,10 +779,6 @@ class AssemblePart(object):
         else:
             return False
         
-
-
-
-
 class Robot(object):
     def __init__(self, robot_num=2):
         self.robots = []

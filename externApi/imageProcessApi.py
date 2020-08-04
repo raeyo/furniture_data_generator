@@ -8,7 +8,7 @@ from PIL import Image
 from datetime import datetime
 
 
-current_path = os.path.dirname(os.path.realpath(__file__))
+current_path = "./"
 
 def perlin_noise(image_path):
     """create perlin noise image
