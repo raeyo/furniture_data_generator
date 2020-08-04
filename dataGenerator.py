@@ -97,7 +97,7 @@ class Generator(object):
 
         self._set_img_name()
         np_name = self.img_name.replace(".png", ".npy") # save numpy 
-        
+        seg_new = np.uint8(seg * 255)
         rgb_image = Image.fromarray(np.uint8(rgb_image * 255))        
         depth_value = np.uint16(depth_raw * self.uint16_conversion)
         seg = Image.fromarray(np.uint8(seg * 255))
