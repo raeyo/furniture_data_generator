@@ -150,9 +150,10 @@ if __name__ =="__main__":
     parser.add_argument("--max_fn_num", type=int, default=2, help="maximum furniture number per scene")
     parser.add_argument("--max_img_num", type=int, default=10000, help="maximum image number")
     parser.add_argument("--ep_length", type=int, default=5, help="number of episode")
-    parser.add_argument("--save_root", type=str, default="/home/raeyo/data_set", help="saving directory root")
-    parser.add_argument("--save_dir", type=str, default="data_set_v13", help="saving directory")
-    parser.add_argument("--dataset_ver", type=int, default=1, help="saving directory")
+    parser.add_argument("--save_root", type=str, default="/SSD1/joo/Dataset/furniture", help="saving directory root")
+    # parser.add_argument("--save_root", type=str, default="/home/raeyo/data_set", help="saving directory root")
+    
+    parser.add_argument("--dataset_ver", type=int, default=13, help="saving directory")
     args = parser.parse_args()
 
     # logger
@@ -164,7 +165,7 @@ if __name__ =="__main__":
     logger.setLevel(level=logging.INFO)
     
 
-
+    save_dir = "SIM_dataset_v" + str(args.dataset_ver)
     # generate data
     generator = Generator(scene=args.scene,
                           max_img_num=args.max_img_num,
@@ -172,7 +173,7 @@ if __name__ =="__main__":
                           logger=logger,
                           ep_length=args.ep_length,
                           save_root=args.save_root,
-                          save_dir=args.save_dir,
+                          save_dir=save_dir,
                           dataset_ver=args.dataset_ver,
                           headless=args.headless,
                           process_id=args.pid,
