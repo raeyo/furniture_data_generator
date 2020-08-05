@@ -67,6 +67,26 @@ class DREnv(object):
             self._fn_color = [0.9, 0.9, 0.9] # white
             self._wood_color = [0.9, 0.7, 0.5]
 
+        elif dataset_ver == 15:
+            # light randomize config
+            self._max_n_light = 3 # the number of point lights 2 ~ 3
+            # camera randomize config
+            self._camera_range = [(0.4, -0.2, 1.5), (0.9, 0.2, 1.8)] # relative to Table_top
+            self.camera_type = 'zivid_ML'
+            # workspace config
+            self._workspace_range = [(-0.4, -0.3), (0.4, 0.3)] # furniture (x, y) value based on self.workspace
+            self._table_distractor_range = [(-0.55, -0.4), (0.55, 0.4)] # distractor (x, y) value based on self.workspace
+            self._light_range = [(-4, -4), (4, 4)]
+            # robot number
+            self._robot_num = 1
+            #TODO: stochastic config
+            self._fn_occ = 0.5
+            self._fn_flip_val = 0.5
+            self._robot_randomize_val = 0 # np.random.rand() > self._robot_randomize_val: -> pass
+            self._distractor_outer = 0.7
+            # furniture texture color reference
+            self._fn_color = [0.9, 0.9, 0.9] # white
+            self._wood_color = [0.9, 0.7, 0.5]
         else:
             print("error")
             exit()
@@ -421,6 +441,7 @@ class DREnv(object):
         for distractor in self.distractor:
             distractor.remove()
         self.distractor = []
+
         self._randomize_distractor(5, is_table=True)
         self._randomize_distractor(5, is_table=False)
         

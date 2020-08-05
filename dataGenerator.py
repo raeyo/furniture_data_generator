@@ -153,7 +153,7 @@ if __name__ =="__main__":
     # parser.add_argument("--save_root", type=str, default="/SSD1/joo/Dataset/furniture", help="saving directory root")
     parser.add_argument("--save_root", type=str, default="/home/raeyo/data_set", help="saving directory root")
     
-    parser.add_argument("--dataset_ver", type=int, default=14, help="saving directory")
+    parser.add_argument("--dataset_ver", type=int, default=15, help="saving directory")
     args = parser.parse_args()
 
     # logger
@@ -162,8 +162,8 @@ if __name__ =="__main__":
     streamHandler = logging.StreamHandler()
     streamHandler.setFormatter(formatter)
     logger.addHandler(streamHandler)
-    # logger.setLevel(level=logging.INFO)
-    logger.setLevel(level=logging.DEBUG)
+    logger.setLevel(level=logging.INFO)
+    # logger.setLevel(level=logging.DEBUG)
     
 
     save_dir = "SIM_dataset_v" + str(args.dataset_ver)
