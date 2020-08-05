@@ -1,5 +1,5 @@
 /image
-/__pycache__
+*__pycache__*
 
 settings.json
 /randomize_textures

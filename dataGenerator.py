@@ -36,7 +36,9 @@ class Generator(object):
                          headless=headless,
                          dataset_ver=dataset_ver,
                          process_id=process_id)
-                         
+        
+        # self.env.test_align()
+
         # data generate setting        
         self.img_max = max_img_num
         self.img_num = 0
@@ -120,8 +122,15 @@ class Generator(object):
             self.logger.error("No save directory")
 
     def run_episode(self):
-        assembly_num = 1
-        furniture_num = np.random.randint(self.fn_min, self.fn_max + 1)
+        if np.random.rand() < 0.7:
+            furniture_num = self.fn_min
+        else:
+            furniture_num = np.random.randint(self.fn_min, self.fn_max + 1)
+        if np.random.rand() < 0.5:
+            assembly_num = 1
+        else:
+            assembly_num = 0
+            furniture_num += 1
         self.furniture_num = furniture_num
         # connector_num = np.random.randint(self.cn_min, self.cn_max)
         self.env.reset(assembly_num, furniture_num)

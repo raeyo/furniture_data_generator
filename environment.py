@@ -9,7 +9,8 @@ from os.path import join
 import random
 import numpy as np
 
-from sensor.camera_manager import CameraManager
+
+from sensor.camera_manager import CameraManager, CameraType
 from sensor.light import Light
 from robot.mypanda import MyPanda
 
@@ -51,7 +52,7 @@ class DREnv(object):
             self._max_n_light = 3 # the number of point lights 2 ~ 3
             # camera randomize config
             self._camera_range = [(0.4, -0.2, 1.5), (0.9, 0.2, 1.8)] # relative to Table_top
-            self.camera_type = 'zivid_ML'
+            self.camera_type = CameraType.Zivid_ML
             # workspace config
             self._workspace_range = [(-0.4, -0.3), (0.4, 0.3)] # furniture (x, y) value based on self.workspace
             self._table_distractor_range = [(-0.55, -0.4), (0.55, 0.4)] # distractor (x, y) value based on self.workspace
@@ -71,18 +72,19 @@ class DREnv(object):
             # light randomize config
             self._max_n_light = 3 # the number of point lights 2 ~ 3
             # camera randomize config
-            self._camera_range = [(0.4, -0.2, 1.5), (0.9, 0.2, 1.8)] # relative to Table_top
-            self.camera_type = 'zivid_ML'
+            self._camera_range = [(-0.05, 0.5, 1), (0.05, 0.65, 1.4)] # relative to self.workspace
+            self.camera_type = CameraType.Azure
             # workspace config
             self._workspace_range = [(-0.4, -0.3), (0.4, 0.3)] # furniture (x, y) value based on self.workspace
             self._table_distractor_range = [(-0.55, -0.4), (0.55, 0.4)] # distractor (x, y) value based on self.workspace
             self._light_range = [(-4, -4), (4, 4)]
             # robot number
-            self._robot_num = 1
+            self._gripper_robot_num = 1
+            self._no_gripper_robot_num = 2
             #TODO: stochastic config
             self._fn_occ = 0.5
             self._fn_flip_val = 0.5
-            self._robot_randomize_val = 0 # np.random.rand() > self._robot_randomize_val: -> pass
+            self._robot_randomize_val = 0.1 # np.random.rand() > self._robot_randomize_val: -> pass
             self._distractor_outer = 0.7
             # furniture texture color reference
             self._fn_color = [0.9, 0.9, 0.9] # white
@@ -92,7 +94,7 @@ class DREnv(object):
             exit()
             
         # static scene
-        self.scene = "./scene/assembly_env_ZVID"
+        self.scene = "./scene/assembly_env_Azure"
         self._initialize_scene(self.scene, headless=headless)
 
         # get scene objects
@@ -108,6 +110,8 @@ class DREnv(object):
         asm_bases = Dummy("assembly_parts").get_objects_in_tree(ObjectType.SHAPE, exclude_base=True, first_generation_only=True)
         self.assembly_parts = [AssemblePart(asm_base) for asm_base in asm_bases]
 
+
+        # align all furniture and assemblys
         self.furnitures = [Furniture("Ikea_stefan_bottom"),
                            Furniture("Ikea_stefan_long"),
                            Furniture("Ikea_stefan_middle"),
@@ -124,24 +128,11 @@ class DREnv(object):
         self.texture_manager = TextureManager(self.process_id, self.pr)
         
         # camera setting
-        self.logger.debug("initialize camera")
-        if self.camera_type == 'zivid-M':
-            self.resolution = [1920, 1200]  
-            self.perspective_angle = 33
-            self._pangle_range = [30, 36]
-        elif self.camera_type == 'zivid_ML':
-            self.resolution = [1920, 1200] # [1920, 1200]
-            self.perspective_angle = 33
-            self._pangle_range = [30, 42] # 30 ~ 36, 36 ~ 42
-        elif self.camera_type == 'azure':
-            self.resolution = [2048, 1536]  
-            self.perspective_angle = 90
-            self._pangle_range = [87, 93]
-        self.camera_manager = CameraManager(self.resolution, self.perspective_angle, self.pr)
+        self.camera_manager = CameraManager(self.camera_type, self.pr)
         
         # robot
         self.logger.debug("initialize robot")
-        self.robot = Robot(robot_num=self._robot_num)
+        self.robot = Robot(self._gripper_robot_num, self._no_gripper_robot_num)
         self.collision_objects += self.robot.respondable
 
         # distractor 1~5
@@ -313,6 +304,7 @@ class DREnv(object):
         random_position = list(np.random.uniform(self._workspace_range[0], self._workspace_range[1]))
         random_position += [fn.height]
         fn.set_position(random_position, relative_to=self.workspace)
+        self.pr.step()
     
     def _randomize_furniture_rotation(self, fn):
         # rotate along rot_axis
@@ -325,6 +317,7 @@ class DREnv(object):
         else:
             pass
         fn.rotate(random_rot)
+        self.pr.step()
 
     def _randomize_furniture_pose(self, fn):
         fn.set_respondable(False)
@@ -334,7 +327,6 @@ class DREnv(object):
         while collision_state and count < 5:
             self._randomize_furniture_position(fn)
             self._randomize_furniture_rotation(fn)
-            self.pr.step()
             
             if self._is_occ:
                 fn.set_position([0, 0, 0.3], relative_to=fn.respondable)
@@ -410,11 +402,11 @@ class DREnv(object):
 
         # randomize position
         random_position = list(np.random.uniform(self._camera_range[0], self._camera_range[1]))
-        self.camera_manager.set_position(random_position, self.table_top)
+        self.camera_manager.set_position(random_position, self.workspace)
 
         # randomize perspective angle
-        rand_pangle = np.random.uniform(self._pangle_range[0], self._pangle_range[1])
-        self.camera_manager.set_perspective_angle(rand_pangle)
+        
+        self.camera_manager.set_random_angle()
 
         self.logger.debug("end randomize camera pose")
 
@@ -483,6 +475,11 @@ class DREnv(object):
                 for i in range(10):
                     self.pr.step()
 
+    def test_align(self):
+        for fn in self.furnitures + self.assembly_parts:
+            fn.set_position([0, 0, fn.height], relative_to=self.workspace)
+        while True:
+            self.pr.step()
     def step(self):
         """
         1. randomize furniture pose
@@ -801,13 +798,17 @@ class AssemblePart(object):
             return False
         
 class Robot(object):
-    def __init__(self, robot_num=2):
-        self.robots = []
-        for i in range(robot_num):
-            self.robots.append(MyPanda(i))
+    def __init__(self, gripper_robot_num=1, no_gripper_num=2):
+        self.robots = [MyPanda(i) for i in range(gripper_robot_num)]
+        self.robots += [MyPanda(i, is_gripper=False) for i in range(no_gripper_num)]
         self.visible = []
-        # for robot in self.robots:
-        #     self.visible += robot.get_visible_objects()
+        for robot in self.robots:
+            self.visible += robot.get_visible_objects()
+        for i, robot in enumerate(self.robots[gripper_robot_num:]):
+            hand_name = "panda_hand_visual#" + str(i)
+            finger_name = "panda_finger_visual#" + str(i)
+            visible_grasp = [Shape(hand_name), Shape(finger_name)]
+            self.visible += visible_grasp
         self.respondable = []
         for robot in self.robots:
             self.respondable += robot.get_respondable_objects()

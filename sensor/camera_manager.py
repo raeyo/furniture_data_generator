@@ -1,28 +1,43 @@
 from pyrep.objects.dummy import Dummy
 from pyrep.backend import sim
 from sensor.mycamera import MyCamera
-import numpy as np
 from pyrep.const import RenderMode
+
+import numpy as np
+from enum import Enum
+class CameraInfo():
+    def __init__(self, resolution, perspective_angle, angle_range):
+        self.resolution = resolution
+        self.perspective_angle = perspective_angle
+        self.angle_range = angle_range
+
+class CameraType(Enum):
+    Azure = CameraInfo([2048, 1536], 90, [87, 93])
+    Zivid_ML = CameraInfo([1920, 1200], 33, [30, 42])
+    Zivid_M = CameraInfo([1920, 1200], 33, [30, 36])
+
+
 class CameraManager(object):
     """
     move cameras
     get images
     manage targets
     """
-    def __init__(self, resolution, perspective_angle, pr):
+    def __init__(self, camera_type: CameraInfo, pr):
         self.controller = Dummy("camera_control")
         self.rot_base = Dummy("camera_rot_base")
 
         self.pr = pr        
         
-        self._resolution = resolution
-        self._perspective_angle = perspective_angle
+        self._resolution = camera_type.value.resolution
+        self._perspective_angle = camera_type.value.perspective_angle
+        self._pangle_range = camera_type.value.angle_range
 
         #TODO: changing by labeling type
-        self.main_camera = MyCamera("main", resolution)
-        self.seg_camera = MyCamera("seg_mask", resolution)
-        self.hole_camera = MyCamera("hole_mask", resolution)
-        self.asm_camera = MyCamera("asm_mask", resolution)
+        self.main_camera = MyCamera("main", self._resolution)
+        self.seg_camera = MyCamera("seg_mask", self._resolution)
+        self.hole_camera = MyCamera("hole_mask", self._resolution)
+        self.asm_camera = MyCamera("asm_mask", self._resolution)
         #TODO: check before data generate(in scene)
         self._initial_pose = self.controller.get_pose(relative_to=self.rot_base)
 
@@ -31,12 +46,16 @@ class CameraManager(object):
         self.controller.set_pose(self._initial_pose, relative_to=self.rot_base)
         self.main_camera.set_render_mode(RenderMode.OPENGL3)
         
-    def set_perspective_angle(self, angle):
+    def _set_perspective_angle(self, angle):
         self.main_camera.set_perspective_angle(angle)
         self.seg_camera.set_perspective_angle(angle)
         self.hole_camera.set_perspective_angle(angle)
         self.asm_camera.set_perspective_angle(angle)
         self._perspective_angle = angle
+
+    def set_random_angle(self):
+        rand_pangle = np.random.uniform(self._pangle_range[0], self._pangle_range[1])
+
 
     def get_perspective_angle(self):
         return self._perspective_angle
