@@ -16,12 +16,14 @@ class MyCamera(object):
         self.camera = VisionSensor(name) 
 
         # camera intrinsic
-        self._set_resolution(resolution)
+        self._resolution = resolution
+        self._set_resolution([1, 1])
+        
         self.set_perspective_angle(perspective_angle)
     
     def _set_resolution(self, resolution):
         self.camera.set_resolution(resolution)
-        self._resolution = resolution
+        
     def get_resolution(self):
         return self._resolution
 
@@ -67,6 +69,12 @@ class MyCamera(object):
 
     def set_render_mode(self, render_mode):
         self.camera.set_render_mode(render_mode)
+
+    def set_activate(self, is_activate):
+        if is_activate:
+            self._set_resolution(self._resolution)
+        else:
+            self._set_resolution([1, 1])
 
     def get_image(self, img_type="all"):
         """get images from vision sensor in scene

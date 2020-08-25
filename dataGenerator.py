@@ -37,8 +37,6 @@ class Generator(object):
                          dataset_ver=dataset_ver,
                          process_id=process_id)
         
-        # self.env.test_align()
-
         # data generate setting        
         self.img_max = max_img_num
         self.img_num = 0
@@ -122,23 +120,13 @@ class Generator(object):
             self.logger.error("No save directory")
 
     def run_episode(self):
-        if np.random.rand() < 0.7:
-            furniture_num = self.fn_min
-        else:
-            furniture_num = np.random.randint(self.fn_min, self.fn_max + 1)
-        if np.random.rand() < 0.5:
-            assembly_num = 1
-        else:
-            assembly_num = 0
-            furniture_num += 1
+        furniture_num = np.random.randint(3, 6)
+        assembly_num = 0
         self.furniture_num = furniture_num
-        # connector_num = np.random.randint(self.cn_min, self.cn_max)
         self.env.reset(assembly_num, furniture_num)
         for i in range(self.ep_length):
             self.env.step()
-            # self.env.test_step(assembly_num, furniture_num)
             self.save_image()
-            # self.env.camera_test()
             self.logger.info(f"successfully saved image: {self.img_name}")
             self.img_num += 1
             # self.env.ep_idx += 1
@@ -158,11 +146,11 @@ if __name__ =="__main__":
     # data generate setting
     parser.add_argument("--max_fn_num", type=int, default=2, help="maximum furniture number per scene")
     parser.add_argument("--max_img_num", type=int, default=10000, help="maximum image number")
-    parser.add_argument("--ep_length", type=int, default=5, help="number of episode")
+    parser.add_argument("--ep_length", type=int, default=20, help="number of episode")
     # parser.add_argument("--save_root", type=str, default="/SSD1/joo/Dataset/furniture", help="saving directory root")
     parser.add_argument("--save_root", type=str, default="/home/raeyo/data_set", help="saving directory root")
     
-    parser.add_argument("--dataset_ver", type=int, default=15, help="saving directory")
+    parser.add_argument("--dataset_ver", type=int, default=17, help="saving directory")
     args = parser.parse_args()
 
     # logger

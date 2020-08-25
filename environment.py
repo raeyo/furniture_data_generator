@@ -8,7 +8,7 @@ import os
 from os.path import join
 import random
 import numpy as np
-
+from enum import Enum
 
 from sensor.camera_manager import CameraManager, CameraType
 from sensor.light import Light
@@ -17,11 +17,12 @@ from robot.mypanda import MyPanda
 from externApi.fileApi import *
 from externApi.imageProcessApi import *
 
-# path 
-gray_texture_path = "./textures/gray_textures/"
-wood_texture_path = "./textures/wood_textures/"
-crawled_texture_path = "./textures/crawled_textures/"
-
+# path
+class TextureType(Enum):
+    gray_texture = "./textures/gray_textures/"
+    wood_texture = "./textures/wood_textures/"
+    crawled_texture = "./textures/crawled_textures/"
+    mixed_texture = "./textures/texture_mix_randomized_small/"
 
 shape_type = [PrimitiveShape.CUBOID,
               PrimitiveShape.SPHERE,
@@ -89,6 +90,52 @@ class DREnv(object):
             # furniture texture color reference
             self._fn_color = [0.9, 0.9, 0.9] # white
             self._wood_color = [0.9, 0.7, 0.5]
+        
+        elif dataset_ver == 16:
+            # light randomize config
+            self._max_n_light = 3 # the number of point lights 2 ~ 3
+            # camera randomize config
+            self._camera_range = [(-0.05, 0.5, 1), (0.05, 0.65, 1.4)] # relative to self.workspace
+            self.camera_type = CameraType.Azure
+            # workspace config
+            self._workspace_range = [(-0.5, -0.3), (0.5, 0.3)] # furniture (x, y) value based on self.workspace
+            self._table_distractor_range = [(-0.55, -0.4), (0.55, 0.4)] # distractor (x, y) value based on self.workspace
+            self._light_range = [(-4, -4), (4, 4)]
+            # robot number
+            self._gripper_robot_num = 1
+            self._no_gripper_robot_num = 2
+            #TODO: stochastic config
+            self._fn_occ = 0.5
+            self._fn_flip_val = 0.5
+            self._robot_randomize_val = 0.1 # np.random.rand() > self._robot_randomize_val: -> pass
+            self._distractor_outer = 0.7
+            # furniture texture color reference
+            self._fn_color = [0.95, 0.95, 0.95] # white
+            self._wood_color = [0.9, 0.7, 0.5]
+        
+        elif dataset_ver == 17:
+            # light randomize config
+            self._max_n_light = 3 # the number of point lights 2 ~ 3
+            # camera randomize config
+            self._camera_range = [(-0.05, 0.5, 1), (0.05, 0.65, 1.4)] # relative to self.workspace
+            self.camera_type = CameraType.Azure
+            # workspace config
+            self._workspace_range = [(-0.5, -0.3), (0.5, 0.3)] # furniture (x, y) value based on self.workspace
+            self._table_distractor_range = [(-0.55, -0.4), (0.55, 0.4)] # distractor (x, y) value based on self.workspace
+            self._light_range = [(-4, -4), (4, 4)]
+            # robot number
+            self._gripper_robot_num = 1
+            self._no_gripper_robot_num = 2
+            #TODO: stochastic config
+            self._fn_occ = 0.5
+            self._fn_flip_val = 0.5
+            self._robot_randomize_val = 0.1 # np.random.rand() > self._robot_randomize_val: -> pass
+            self._distractor_outer = 0.7
+            # furniture texture color reference
+            self._fn_color = [0.95, 0.95, 0.95] # white
+            self._wood_color = [0.9, 0.7, 0.5]
+        
+        
         else:
             print("error")
             exit()
@@ -105,13 +152,13 @@ class DREnv(object):
         self.lights = [Light("Light1"), Light("Light2"),
                        Light("Light3"), Light("Light4")]
         self.floors = [Shape("Floor1"), Shape("Floor2"), Shape("Floor3"), Shape("Floor4"), Shape("Floor5")]
-        self.collision_objects = self.table.get_objects_in_tree(ObjectType.SHAPE, exclude_base=True)
+        self.collision_objects = [obj for obj in self.table.get_objects_in_tree(ObjectType.SHAPE, exclude_base=True) if "invisible" in obj.get_name()]
 
         asm_bases = Dummy("assembly_parts").get_objects_in_tree(ObjectType.SHAPE, exclude_base=True, first_generation_only=True)
         self.assembly_parts = [AssemblePart(asm_base) for asm_base in asm_bases]
 
 
-        # align all furniture and assemblys
+        # align all furniture and assemblys (max height == 0.18)
         self.furnitures = [Furniture("Ikea_stefan_bottom"),
                            Furniture("Ikea_stefan_long"),
                            Furniture("Ikea_stefan_middle"),
@@ -121,6 +168,7 @@ class DREnv(object):
         for fn in self.furnitures + self.assembly_parts:
             height, axis = self.get_rotation_axis(fn.respondable)
             fn.set_rotation_axis(height, axis)
+        
         self.logger.debug("End initialize Scene")
 
         # texture
@@ -136,12 +184,15 @@ class DREnv(object):
         self.collision_objects += self.robot.respondable
 
         # distractor 1~5
-        self.distractor_base = Shape("workspace_C")
+        self.distractor_bases = [Shape("workspace_C"), Shape("workspace_D")]
         self._distractor_range = [(-0.2, -2.5), (0.2, 2.5)]
         self.distractor = []  
 
         # occlusion
         self._is_occ = False
+
+        # opposed side
+        self._opposed_mode = False
         
         
     def _initialize_scene(self, scene_file, headless):
@@ -173,7 +224,7 @@ class DREnv(object):
             self.pr.step()
         else:
             scale = 1
-            xy_position=self.distractor_base.get_position()[:2]
+            xy_position=self.distractor_bases[0].get_position()[:2]
             for i in range(num):
                 sh_type = random.choice(shape_type)
                 size = list((np.random.rand(3) + 1) * scale)
@@ -203,17 +254,17 @@ class DREnv(object):
                 dis_sh.set_position(random_position, relative_to=base)
                 random_orientation = list(np.random.rand(3))
                 dis_sh.set_orientation(random_orientation)
-                self.texture_manager.set_random_grad_texture(dis_sh)
+                self.texture_manager.set_random_texture(dis_sh, TextureType.gray_texture)
         else:
             distractor_range = self._distractor_range
-            base = self.distractor_base
             for dis_sh in distractors:
+                base = random.choice(self.distractor_bases)
                 random_position = list(np.random.uniform(distractor_range[0], distractor_range[1]))
                 random_position += [np.random.rand()*0.1]
                 dis_sh.set_position(random_position, relative_to=base)
                 random_orientation = list(np.random.rand(3))
                 dis_sh.set_orientation(random_orientation)
-                self.texture_manager.set_random_grad_texture(dis_sh)
+                self.texture_manager.set_random_texture(dis_sh, TextureType.gray_texture)
         self.pr.step()
         self.distractor += distractors
         self.logger.debug("end to randomize distractor")
@@ -236,28 +287,11 @@ class DREnv(object):
     def _randomize_floor(self):
         bottom = self.floors[0]
         walls = self.floors[1:]
-        self.texture_manager.set_random_grad_texture(bottom)
-        self.texture_manager.set_random_grad_texture(walls)
-        # bottom_texture = self.texture_manager._get_grad_randomized_texture()
-        # wall_texture = self.texture_manager._get_grad_randomized_texture()
-        # rand_ind = np.random.randint(4)
-        # rand_scale = list(np.random.rand(2) * 5)
-        # bottom.set_texture(texture=bottom_texture,
-        #                    mapping_mode=TextureMappingMode(rand_ind),
-        #                    uv_scaling=rand_scale,
-        #                    repeat_along_u=True,
-        #                    repeat_along_v=True)
-        # rand_ind = np.random.randint(4)
-        # rand_scale = list(np.random.rand(2) * 5)                           
-        # for wall in walls:
-        #     wall.set_texture(texture=wall_texture,
-        #                      mapping_mode=TextureMappingMode(rand_ind),
-        #                      uv_scaling=rand_scale,
-        #                      repeat_along_u=True,
-        #                      repeat_along_v=True)
+        self.texture_manager.set_random_texture(bottom, TextureType.gray_texture)
+        self.texture_manager.set_random_texture(walls, TextureType.gray_texture)
     
     def _randomize_table(self):
-        table_texture = self.texture_manager._get_grad_randomized_texture()
+        table_texture = self.texture_manager._get_randomize_texture(TextureType.mixed_texture)
         self.table.set_texture(texture=table_texture,
                                mapping_mode=TextureMappingMode(3),
                                uv_scaling=[3, 3],
@@ -271,17 +305,29 @@ class DREnv(object):
         for vis in self.robot.visible:
             if np.random.rand() > self._robot_randomize_val:
                 continue
-            self.texture_manager.set_random_grad_texture(vis)
+            self.texture_manager.set_random_texture(vis, TextureType.gray_texture)
         self.pr.step()
     #endregion
 
     #region furniture randomize
     def _sample_furnitures(self, asm_num, fn_num):
+        # if self._is_occ:
+        #     for fn in self.furnitures:
+        #         fn.switch_respondable_to_bbox(is_bbox=False)
+        # else:
+        #     for fn in self.furnitures:
+        #         fn.switch_respondable_to_bbox(is_bbox=True)
+        # self.pr.step()
         for asm in self.assembly_parts:
             asm.deactivate()
         for fn in self.furnitures:
             fn.activate(False)
         self.pr.step()
+        for asm in self.assembly_parts:
+            asm.reset()
+        for fn in self.furnitures:
+            fn.reset()
+        
         self.scene_assmbled = random.sample(self.assembly_parts, asm_num)
         #TODO: if impossible to assemble
         for asm in self.scene_assmbled:
@@ -302,7 +348,10 @@ class DREnv(object):
         fn can be primitive or assembled furniture
         """
         random_position = list(np.random.uniform(self._workspace_range[0], self._workspace_range[1]))
-        random_position += [fn.height]
+        if self._is_occ:
+            random_position += [0.33]
+        else:
+            random_position += [fn.height]
         fn.set_position(random_position, relative_to=self.workspace)
         self.pr.step()
     
@@ -327,13 +376,13 @@ class DREnv(object):
         while collision_state and count < 5:
             self._randomize_furniture_position(fn)
             self._randomize_furniture_rotation(fn)
-            
-            if self._is_occ:
-                fn.set_position([0, 0, 0.3], relative_to=fn.respondable)
-                self.pr.step()            
+
             collision_state = self._check_collision(fn.respondable)
             count += 1
-
+        if collision_state and not self._is_occ:
+            current_pos = fn.get_position()
+            current_pos[2] += 0.2
+            fn.set_position(current_pos)
         fn.set_respondable(True)
         self.pr.step()
 
@@ -343,8 +392,8 @@ class DREnv(object):
         if fn.is_hole:
             wood_visible += [fn.hole]
         
-        self.texture_manager.set_random_grad_texture(rand_visible, refer=self._fn_color)
-        self.texture_manager.set_random_wood_texture(wood_visible)
+        self.texture_manager.set_random_texture(rand_visible, TextureType.gray_texture, refer=self._fn_color)
+        self.texture_manager.set_random_texture(wood_visible, TextureType.wood_texture)
         
     def _randomize_furniture(self):
         self.logger.debug("start to randomize furniture")
@@ -364,6 +413,7 @@ class DREnv(object):
         for c_obj in self.collision_objects + self.distractor:
             if c_obj.check_collision(obj):
                 is_collision = True
+                print(c_obj.get_name())
                 return is_collision
         
         for f_obj in self.scene_furniture + self.scene_assmbled:
@@ -402,6 +452,9 @@ class DREnv(object):
 
         # randomize position
         random_position = list(np.random.uniform(self._camera_range[0], self._camera_range[1]))
+        if self._opposed_mode:
+            random_position[1] *= -1
+        
         self.camera_manager.set_position(random_position, self.workspace)
 
         # randomize perspective angle
@@ -410,10 +463,17 @@ class DREnv(object):
 
         self.logger.debug("end randomize camera pose")
 
+    
     #endregion
     def set_stable(self):
+        for fn in self.scene_furniture + self.scene_assmbled:
+            fn.set_dynamic(True)
+        self.pr.step()
         for i in range(3):
             self.pr.step()
+        for fn in self.scene_furniture + self.scene_assmbled:
+            fn.set_dynamic(False)
+        self.pr.step()
 
     def randomize_scene(self):
         self.logger.debug("start to randomize scene")
@@ -433,6 +493,11 @@ class DREnv(object):
         for distractor in self.distractor:
             distractor.remove()
         self.distractor = []
+
+        if np.random.rand() < 0.5:
+            self._opposed_mode = True
+        else:
+            self._opposed_mode = False
 
         self._randomize_distractor(5, is_table=True)
         self._randomize_distractor(5, is_table=False)
@@ -476,10 +541,19 @@ class DREnv(object):
                     self.pr.step()
 
     def test_align(self):
-        for fn in self.furnitures + self.assembly_parts:
-            fn.set_position([0, 0, fn.height], relative_to=self.workspace)
-        while True:
-            self.pr.step()
+        if np.random.rand() < self._fn_occ:
+            self._is_occ = False
+        else:
+            self._is_occ = True
+
+        self._sample_furnitures(0, 1)
+        
+        for fn in self.scene_furniture:
+            fn.set_position([0, 0, 1.1])
+            for i in range(10):
+                self._randomize_furniture_rotation(fn)
+        self.set_stable()
+
     def step(self):
         """
         1. randomize furniture pose
@@ -627,6 +701,7 @@ class Furniture(object):
     def __init__(self, furniture_name):
         self.name = furniture_name
         self.respondable = Shape(furniture_name)
+        self.temp_res = self.respondable
         self.visible_part = Shape(furniture_name + "_visible_tex")
         self.wood = Shape(furniture_name + "_visible_wood")
         try:
@@ -638,12 +713,37 @@ class Furniture(object):
         self.is_activate = False
         self._init_parent = self.respondable.get_parent()
         self.is_assembled = False
-        self._initial_pose = self.respondable.get_pose()
+        self._initialize_bbox()
 
+    def _initialize_bbox(self):
+        bbox = self.respondable.get_bounding_box()
+        ori = self.respondable.get_orientation()
+        position = self.respondable.get_position()
+        xyz = [bbox[1], bbox[3], bbox[5]]
+        size = list(np.array(xyz)*2)
+        self.bbox = Shape.create(type=PrimitiveShape.CUBOID,
+                                 size=size,
+                                 respondable=False,
+                                 renderable=False,
+                                 static=False,
+                                 position=position,
+                                 orientation=ori,
+                                )
+        self.bbox.set_detectable(False)
+        
+    def switch_respondable_to_bbox(self, is_bbox):
+        if is_bbox:
+            self.respondable = self.bbox
+            self.temp_res.set_parent(self.bbox)
+            
+        else:
+            self.respondable = self.temp_res
+            self.respondable.set_parent(None)
 
     def set_rotation_axis(self, height, rot_axis):
         self.height = height
         self.rot_axis = rot_axis
+        self._initial_pose = self.respondable.get_pose()
 
     def set_position(self, position, relative_to=None):
         self.respondable.set_position(position, relative_to)
@@ -672,15 +772,18 @@ class Furniture(object):
     def check_collision(self, obj):
         self.respondable.check_collision(obj)
 
+    def set_dynamic(self ,is_dynamic):
+        self.respondable.set_dynamic(is_dynamic)
+
     def activate(self, is_activate):
-        self.respondable.set_dynamic(is_activate)
         self.respondable.set_respondable(is_activate)
         self.visible_part.set_renderable(is_activate)
         self.wood.set_renderable(is_activate)
         if self.is_hole:
             self.hole.set_renderable(is_activate)
-        if not is_activate:
-            self.respondable.set_pose(self._initial_pose)
+
+    def reset(self):
+        self.respondable.set_pose(self._initial_pose)
 
     def set_assembled(self, is_assembled):
         self.activate(is_assembled)
@@ -692,7 +795,6 @@ class Furniture(object):
             self.set_parent(self._init_parent)
         self.is_assembled = is_assembled
         
-
 class AssemblePart(object):
     """assembled furnitures
     assembled part
@@ -704,7 +806,6 @@ class AssemblePart(object):
     def __init__(self, assembled_part: Shape):
         self.respondable = assembled_part
         self.sub_parts = self._get_sub_parts()
-        self._initial_pose = self.respondable.get_pose()
         self.used_fn = []
 
     def get_bbox(self):
@@ -722,6 +823,7 @@ class AssemblePart(object):
     def set_rotation_axis(self, height, rot_axis):
         self.height = height
         self.rot_axis = rot_axis
+        self._initial_pose = self.respondable.get_pose()
 
     def set_position(self, position, relative_to=None):
         self.respondable.set_position(position, relative_to)
@@ -783,15 +885,18 @@ class AssemblePart(object):
             fn.set_assembled(False)
         self.used_fn = []
 
+    def set_dynamic(self, is_dynamic):
+        self.respondable.set_dynamic(is_dynamic)
+
     def deactivate(self):
-        self.respondable.set_dynamic(False)
         self.respondable.set_respondable(False)
         self.release()
-        self.respondable.set_pose(self._initial_pose)
+
+    def reset(self):
+        self.respondable.set_pose(self._initial_pose)   
 
     def activate(self, furnitures):
         if self._catch_fn_parts(furnitures):
-            self.respondable.set_dynamic(True)
             self.respondable.set_respondable(True)
             return True
         else:
@@ -832,10 +937,8 @@ class TextureManager(object):
         self.pr = pr
         self._color_variance = 0.1
         self.texture_shapes = []
-        self.gray_textures = self._load_gray_texture_files()
-        self.wood_textures = self._load_wood_texture_files()
-        self.crawled_textures = self._load_crawled_texture_files()
-
+        self.textures = self._load_texture_files()
+        
     def _get_random_color(self, refer=None):
         """[get random color]
         
@@ -851,75 +954,18 @@ class TextureManager(object):
             random_color = list(np.random.uniform(color_min, color_max))
             return random_color        
     
-    #region load texture files
-    def _load_gray_texture_files(self):
-        """get all gray texture file list
-        
-        Returns:
-            [type] -- [description]
-        """
-        texture_path = gray_texture_path
-        texture_list = get_file_list(texture_path)
+    def _load_texture_files(self):
+        textures = {}
+        for p in TextureType:
+            textures[p.name] = get_file_list(p.value)
 
-        return texture_list
+        return textures
 
-    def _load_wood_texture_files(self):
-        """get all gray texture file list
-        
-        Returns:
-            [type] -- [description]
-        """
-        texture_path = wood_texture_path
-        texture_list = get_file_list(texture_path)
+    def _get_random_texture(self, texture_type):
+        texture_path = random.choice(self.textures[texture_type.name])
 
-        return texture_list
+        return texture_path
 
-    def _load_crawled_texture_files(self):
-        """get all gray texture file list
-        
-        Returns:
-            [type] -- [description]
-        """
-        texture_path = crawled_texture_path
-        texture_list = get_file_list(texture_path)
-
-        return texture_list
-    #endregion
-
-    def _get_random_gray_texture(self):
-        """get random gray texture from texture list
-        
-        Returns:
-            texture file path
-        """
-        ind = np.random.randint(len(self.gray_textures))
-        texture = self.gray_textures[ind]
-        
-        return texture
-
-    def _get_random_wood_texture(self):
-        """get random gray texture from texture list
-        
-        Returns:
-            texture file path
-        """
-        ind = np.random.randint(len(self.wood_textures))
-        texture = self.wood_textures[ind]
-        
-        return texture
-
-    def _get_random_crawled_texture(self):
-        """get random gray texture from texture list
-        
-        Returns:
-            texture file path
-        """
-        ind = np.random.randint(len(self.crawled_textures))
-        texture = self.crawled_textures[ind]
-        
-        return texture
-
-    #region create texture shape
     def _create_texture(self, texture_path):
         try:
             shape, texture = self.pr.create_texture(filename=texture_path)
@@ -931,7 +977,12 @@ class TextureManager(object):
 
         return texture
     
-    def _get_grad_randomized_texture(self, refer=None):
+    #TODO:jsjs
+    def _get_mixed_randomized_teuxture(self, texture_path):
+        rand_texture_path = False
+        return rand_texture_path
+
+    def _get_grad_randomized_texture(self, texture_path, refer=None):
         """create randomize texture in scene
         1. get random gray texture from texture file list
         2. get two random color(can be refer)
@@ -944,7 +995,6 @@ class TextureManager(object):
         Returns:
             [type] -- [description]
         """
-        texture_path = self._get_random_gray_texture()
         #region create gradient randomize texture
         first_color = self._get_random_color(refer=refer)
         if refer==None:
@@ -965,30 +1015,22 @@ class TextureManager(object):
                                                 self.process_id)        
         #endregion
              
+        return rand_texture_path
+    
+    def _get_randomize_texture(self, texture_type, refer=None):
+        rand_texture_path = self._get_random_texture(texture_type)
+
+        if texture_type == TextureType.gray_texture:
+            rand_texture_path = self._get_grad_randomized_texture(rand_texture_path, refer=refer)
+        elif texture_type == TextureType.mixed_texture:
+            rand_texture_path = self._get_mixed_randomized_teuxture(rand_texture_path)#TODO:jsjs
+
         texture = False
         while type(texture) == bool:
             texture = self._create_texture(rand_texture_path)
 
         return texture
     
-    def _get_wood_randomized_texture(self):
-        rand_texture_path = self._get_random_wood_texture()
-        texture = False
-        while type(texture) == bool:
-            texture = self._create_texture(rand_texture_path)
-
-        return texture
-    
-    def _get_crawled_randomized_texture(self):
-        rand_texture_path = self._get_random_crawled_texture()
-        texture = False
-        while type(texture) == bool:
-            texture = self._create_texture(rand_texture_path)
-
-        return texture
-    #endregion
-
-    #region set texture to object
     def _set_random_texture(self, obj_visible, texture):
         mapping_ind = np.random.randint(4)
         uv_scale = list(np.random.uniform((0, 0), (5, 5)))
@@ -1006,20 +1048,10 @@ class TextureManager(object):
                                 repeat_along_u=True,
                                 repeat_along_v=True)  
 
-    def set_random_wood_texture(self, obj_visible):
-        texture = self._get_wood_randomized_texture()
+    def set_random_texture(self, obj_visible, texture_type: TextureType, refer=None):
+        texture = self._get_randomize_texture(texture_type, refer=refer)
         self._set_random_texture(obj_visible, texture)
-
-    def set_random_crawled_texture(self, obj_visible):
-        texture = self._get_crawled_randomized_texture()
-        self._set_random_texture(obj_visible, texture)
-
-    def set_random_grad_texture(self, obj_visible, refer=None):
-        texture = self._get_grad_randomized_texture(refer=refer)
-        self._set_random_texture(obj_visible, texture)
-        
-    #endregion
-
+    
     def reset(self):
         for sh in self.texture_shapes:
             sh.remove()
