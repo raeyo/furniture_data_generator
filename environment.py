@@ -22,7 +22,7 @@ class TextureType(Enum):
     gray_texture = "./textures/gray_textures/"
     wood_texture = "./textures/wood_textures/"
     crawled_texture = "./textures/crawled_textures/"
-    mixed_texture = "./textures/texture_mix_randomized_small/"
+    mixed_texture = "./textures/texture_mix_randomized_small/" #TODO:jsjs
 
 shape_type = [PrimitiveShape.CUBOID,
               PrimitiveShape.SPHERE,
@@ -979,7 +979,7 @@ class TextureManager(object):
     
     #TODO:jsjs
     def _get_mixed_randomized_teuxture(self, texture_path):
-        rand_texture_path = False
+        rand_texture_path = texture_path
         return rand_texture_path
 
     def _get_grad_randomized_texture(self, texture_path, refer=None):
