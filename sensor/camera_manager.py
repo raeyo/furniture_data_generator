@@ -12,7 +12,8 @@ class CameraInfo():
         self.angle_range = angle_range
 
 class CameraType(Enum):
-    Azure = CameraInfo([2048, 1536], 90, [87, 93])
+    # Azure = CameraInfo([2048, 1536], 90, [87, 93])
+    Azure = CameraInfo([1024, 768], 90, [87, 93])
     Zivid_ML = CameraInfo([1920, 1200], 33, [30, 42])
     Zivid_M = CameraInfo([1920, 1200], 33, [30, 36])
 
@@ -44,7 +45,7 @@ class CameraManager(object):
     def reset(self):
         #TODO: randomize rotation base
         self.controller.set_pose(self._initial_pose, relative_to=self.rot_base)
-        self.main_camera.set_render_mode(RenderMode.OPENGL3)
+        self.set_activate(False)
         
     def _set_perspective_angle(self, angle):
         self.main_camera.set_perspective_angle(angle)
@@ -78,7 +79,7 @@ class CameraManager(object):
     def set_position(self, position, relative_to=None):
         self.controller.set_position(position, relative_to=relative_to)
 
-    def _set_activate(self, is_activate):
+    def set_activate(self, is_activate):
         self.main_camera.set_activate(is_activate)
         self.seg_camera.set_activate(is_activate)
         self.hole_camera.set_activate(is_activate)
@@ -86,17 +87,13 @@ class CameraManager(object):
 
     #TODO: changing by labeling
     def capture(self):
-        self._set_activate(True)
-        self.pr.step()
         self.main_rgb, self.main_depth = self.main_camera.get_image()
         self.seg_rgb, _ = self.seg_camera.get_image("rgb")
         hole_rgb, _ = self.hole_camera.get_image("rgb")
         self.hole_mask = hole_rgb[:, :, 0] > 0.5
         _, asm_depth = self.asm_camera.get_image("depth")
         self.asm_mask = asm_depth < 0.98
-        self._set_activate(False)
-        self.pr.step()
-
+        
     def get_images(self):
         return self.main_rgb, self.main_depth, self.seg_rgb, self.hole_mask, self.asm_mask
 

@@ -120,12 +120,13 @@ class Generator(object):
             self.logger.error("No save directory")
 
     def run_episode(self):
-        furniture_num = np.random.randint(3, 6)
-        assembly_num = 0
+        furniture_num = np.random.randint(1, 4) # 1, 2, 3
+        assembly_num = 1
         self.furniture_num = furniture_num
         self.env.reset(assembly_num, furniture_num)
         for i in range(self.ep_length):
             self.env.step()
+            # self.env.test_align()
             self.save_image()
             self.logger.info(f"successfully saved image: {self.img_name}")
             self.img_num += 1
@@ -146,7 +147,7 @@ if __name__ =="__main__":
     # data generate setting
     parser.add_argument("--max_fn_num", type=int, default=2, help="maximum furniture number per scene")
     parser.add_argument("--max_img_num", type=int, default=10000, help="maximum image number")
-    parser.add_argument("--ep_length", type=int, default=20, help="number of episode")
+    parser.add_argument("--ep_length", type=int, default=10, help="number of episode")
     # parser.add_argument("--save_root", type=str, default="/SSD1/joo/Dataset/furniture", help="saving directory root")
     parser.add_argument("--save_root", type=str, default="/home/raeyo/data_set", help="saving directory root")
     

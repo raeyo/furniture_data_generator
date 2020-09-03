@@ -24,6 +24,9 @@ class TextureType(Enum):
     crawled_texture = "./textures/crawled_textures/"
     mixed_texture = "./textures/texture_mix_randomized_small/" #TODO:jsjs
 
+class ArrangeType(Enum):
+    align = 0
+            
 shape_type = [PrimitiveShape.CUBOID,
               PrimitiveShape.SPHERE,
               PrimitiveShape.CYLINDER,
@@ -120,7 +123,7 @@ class DREnv(object):
             self._camera_range = [(-0.05, 0.5, 1), (0.05, 0.65, 1.4)] # relative to self.workspace
             self.camera_type = CameraType.Azure
             # workspace config
-            self._workspace_range = [(-0.5, -0.3), (0.5, 0.3)] # furniture (x, y) value based on self.workspace
+            self._workspace_range = [(-0.4, -0.2), (0.4, 0.2)] # furniture (x, y) value based on self.workspace
             self._table_distractor_range = [(-0.55, -0.4), (0.55, 0.4)] # distractor (x, y) value based on self.workspace
             self._light_range = [(-4, -4), (4, 4)]
             # robot number
@@ -134,7 +137,6 @@ class DREnv(object):
             # furniture texture color reference
             self._fn_color = [0.95, 0.95, 0.95] # white
             self._wood_color = [0.9, 0.7, 0.5]
-        
         
         else:
             print("error")
@@ -156,6 +158,9 @@ class DREnv(object):
 
         asm_bases = Dummy("assembly_parts").get_objects_in_tree(ObjectType.SHAPE, exclude_base=True, first_generation_only=True)
         self.assembly_parts = [AssemblePart(asm_base) for asm_base in asm_bases]
+
+        self.scene_furniture = []
+        self.scene_assembled = []
 
 
         # align all furniture and assemblys (max height == 0.18)
@@ -188,13 +193,19 @@ class DREnv(object):
         self._distractor_range = [(-0.2, -2.5), (0.2, 2.5)]
         self.distractor = []  
 
+        # box
+        self.boxes = [Shape("box_A"), Shape("box_B")]
+        self.scene_boxes = []
+        self.min_box_num, self.max_box_num = 3, 6
+        self._box_color = [0.99, 0.99, 0.99]
+        self.segmentation_dummy = Dummy("segmentation")
+
         # occlusion
         self._is_occ = False
 
         # opposed side
         self._opposed_mode = False
-        
-        
+
     def _initialize_scene(self, scene_file, headless):
         if type(scene_file) == str:
             scene_file = scene_file + ".ttt"
@@ -243,10 +254,10 @@ class DREnv(object):
         distractors = self._create_distractors(num, is_table)
         if is_table:
             distractor_range = self._table_distractor_range
-            base = self.workspace
+            base = self.table_top
             for dis_sh in distractors:
                 random_position = list(np.random.uniform(distractor_range[0], distractor_range[1]))
-                random_position += [0]
+                random_position += [0.02]
                 if np.random.rand() < self._distractor_outer:
                     axis_idx = np.random.randint(0,2)
                     val_idx = np.random.randint(0,2)
@@ -271,6 +282,31 @@ class DREnv(object):
     #endregion
 
     #region scene randomize
+    def _randomize_boxes(self):
+        num = np.random.randint(self.min_box_num, self.max_box_num + 1)
+        for i in range(num):
+            box = random.choice(self.boxes)
+            cp_box = box.copy()
+            cp_box.set_parent(self.segmentation_dummy)
+            self.scene_boxes.append(cp_box)        
+
+        for box in self.scene_boxes:
+            collision_state = True
+            count = 0
+
+            while collision_state and count < 5:
+                position = list(np.random.uniform(self._workspace_range[0], self._workspace_range[1]))
+                position += [0.08]
+                rand_ori = [0, 0] + [np.random.rand()]
+                box.set_position(position, relative_to=self.workspace)
+                box.set_orientation(rand_ori)
+                self.pr.step()    
+                collision_state = self._check_collision(box)
+                count += 1
+
+            self.set_auxiliary_color(box, [0,0,1])
+            self.texture_manager.set_random_texture(box, TextureType.gray_texture, refer=self._box_color)
+
     def _randomize_light(self):
         for light in self.lights:
             light.light_off()
@@ -307,6 +343,7 @@ class DREnv(object):
                 continue
             self.texture_manager.set_random_texture(vis, TextureType.gray_texture)
         self.pr.step()
+    
     #endregion
 
     #region furniture randomize
@@ -328,9 +365,9 @@ class DREnv(object):
         for fn in self.furnitures:
             fn.reset()
         
-        self.scene_assmbled = random.sample(self.assembly_parts, asm_num)
+        self.scene_assembled = random.sample(self.assembly_parts, asm_num)
         #TODO: if impossible to assemble
-        for asm in self.scene_assmbled:
+        for asm in self.scene_assembled:
             _ = asm.activate(self.furnitures)
         
         unused_fns = []
@@ -342,20 +379,22 @@ class DREnv(object):
         for fn in self.scene_furniture:
             fn.activate(True)
     
+
+
     def _randomize_furniture_position(self, fn):
         """
         randomize furniture position in workspace
         fn can be primitive or assembled furniture
         """
+        height = fn.get_height(relative_to=self.workspace)
         random_position = list(np.random.uniform(self._workspace_range[0], self._workspace_range[1]))
-        if self._is_occ:
-            random_position += [0.33]
-        else:
-            random_position += [fn.height]
+        random_position += [-1 * height]
+        
         fn.set_position(random_position, relative_to=self.workspace)
         self.pr.step()
     
     def _randomize_furniture_rotation(self, fn):
+        
         # rotate along rot_axis
         random_rot = [0, 0, 0]
         random_rot[fn.rot_axis] = np.random.rand() * np.pi * 2
@@ -365,6 +404,10 @@ class DREnv(object):
             random_rot[flip_idx] = np.pi            
         else:
             pass
+        
+        # random rotate
+        random_rot = np.random.rand(3) * np.pi * 2
+        
         fn.rotate(random_rot)
         self.pr.step()
 
@@ -374,14 +417,15 @@ class DREnv(object):
         collision_state = True
         count = 0
         while collision_state and count < 5:
-            self._randomize_furniture_position(fn)
             self._randomize_furniture_rotation(fn)
-
+            self._randomize_furniture_position(fn)
+            
             collision_state = self._check_collision(fn.respondable)
             count += 1
-        if collision_state and not self._is_occ:
+        print("-"*20)
+        if collision_state:
             current_pos = fn.get_position()
-            current_pos[2] += 0.2
+            current_pos[2] += 10
             fn.set_position(current_pos)
         fn.set_respondable(True)
         self.pr.step()
@@ -397,7 +441,7 @@ class DREnv(object):
         
     def _randomize_furniture(self):
         self.logger.debug("start to randomize furniture")
-        for asm in self.scene_assmbled:
+        for asm in self.scene_assembled:
             self._randomize_furniture_pose(asm)
             for fn in asm.used_fn:
                 self._randomize_furniture_texture(fn)
@@ -410,18 +454,19 @@ class DREnv(object):
     def _check_collision(self, obj):
         #TODO:
         is_collision = False
-        for c_obj in self.collision_objects + self.distractor:
+        for c_obj in self.collision_objects + self.distractor + self.boxes:
             if c_obj.check_collision(obj):
                 is_collision = True
                 print(c_obj.get_name())
                 return is_collision
         
-        for f_obj in self.scene_furniture + self.scene_assmbled:
+        for f_obj in self.scene_furniture + self.scene_assembled:
             res = f_obj.respondable
             if res == obj:
                 continue
             if res.check_collision(obj):
                 is_collision = True
+                print(res.get_name())
                 return is_collision
 
         return is_collision
@@ -442,6 +487,16 @@ class DREnv(object):
         self.pr.step()
 
         return val, idx
+    @staticmethod
+    def set_auxiliary_color(obj: Shape, color) -> None:
+        """Sets the color of the shape.
+
+        :param color: The r, g, b values of the shape.
+        :return:
+        """
+        sim.simSetShapeColor(
+            obj._handle, None, sim.sim_colorcomponent_auxiliary, color)
+    
     #endregion
 
     def _randomize_camera(self):
@@ -463,15 +518,14 @@ class DREnv(object):
 
         self.logger.debug("end randomize camera pose")
 
-    
     #endregion
     def set_stable(self):
-        for fn in self.scene_furniture + self.scene_assmbled:
+        for fn in self.scene_furniture + self.scene_assembled:
             fn.set_dynamic(True)
         self.pr.step()
         for i in range(3):
             self.pr.step()
-        for fn in self.scene_furniture + self.scene_assmbled:
+        for fn in self.scene_furniture + self.scene_assembled:
             fn.set_dynamic(False)
         self.pr.step()
 
@@ -488,12 +542,16 @@ class DREnv(object):
         self.logger.info("start to reset scene")
         self.texture_manager.reset()
         self.camera_manager.reset()
-        #TODO:
-        # self.distractor_manager.reset()
+        
         for distractor in self.distractor:
             distractor.remove()
         self.distractor = []
 
+        for box in self.scene_boxes:
+            box.remove()
+        self.scene_boxes = []
+
+        # if opposed_mode => distractor, camera location is opposed
         if np.random.rand() < 0.5:
             self._opposed_mode = True
         else:
@@ -501,8 +559,8 @@ class DREnv(object):
 
         self._randomize_distractor(5, is_table=True)
         self._randomize_distractor(5, is_table=False)
-        
-        self.randomize_scene()
+        self._randomize_boxes()
+
         self._sample_furnitures(assembly_num, furniture_num)
         if np.random.rand() < self._fn_occ and len(self.scene_furniture) > 1:
             self._is_occ = True
@@ -511,8 +569,10 @@ class DREnv(object):
         
         self._randomize_furniture()
         
+        self.randomize_scene()
         
-        self.pr.step()
+        self.camera_manager.set_activate(True)
+        self.set_stable()
         self.logger.info("End to reset scene")
 
     def test_step(self, assembly_num, furniture_num):
@@ -541,18 +601,9 @@ class DREnv(object):
                     self.pr.step()
 
     def test_align(self):
-        if np.random.rand() < self._fn_occ:
-            self._is_occ = False
-        else:
-            self._is_occ = True
-
-        self._sample_furnitures(0, 1)
-        
-        for fn in self.scene_furniture:
-            fn.set_position([0, 0, 1.1])
-            for i in range(10):
-                self._randomize_furniture_rotation(fn)
-        self.set_stable()
+        for i in range(100):
+            fn = random.choice(self.scene_furniture+self.scene_assembled)
+            self._randomize_furniture_pose(fn)
 
     def step(self):
         """
@@ -561,7 +612,7 @@ class DREnv(object):
         3. (opt)randomize robot pose
         """
         #TODO: randomize furniture pose
-        scene_fns = self.scene_assmbled + self.scene_furniture
+        scene_fns = self.scene_assembled + self.scene_furniture
         fn = random.choice(scene_fns)
         self._randomize_furniture_pose(fn)
         self.logger.debug("start one step")
@@ -701,6 +752,7 @@ class Furniture(object):
     def __init__(self, furniture_name):
         self.name = furniture_name
         self.respondable = Shape(furniture_name)
+        self.respondable.set_mass(0.01)
         self.temp_res = self.respondable
         self.visible_part = Shape(furniture_name + "_visible_tex")
         self.wood = Shape(furniture_name + "_visible_wood")
@@ -731,6 +783,39 @@ class Furniture(object):
                                 )
         self.bbox.set_detectable(False)
         
+    def get_height(self, relative_to=None):
+        """get current height relative to world coordinate
+        """
+        bbox = self.respondable.get_bounding_box()
+        m = self.respondable.get_matrix()
+        bbox_axis = [
+            [m[0], m[4], m[8]], # x 
+            [m[1], m[5], m[9]], # y
+            [m[2], m[6], m[10]] # z
+        ]
+        bbox_axis = np.array(bbox_axis)
+        object_pos = np.array(self.respondable.get_position(relative_to=relative_to))
+        min_height = np.inf
+        for i in range(8):
+            delta = np.array([bbox[1], bbox[3], bbox[5]])
+            if i // 4 == 0: 
+                pass
+            else: # 4,5,6,7
+                delta[0] *= -1
+            if (i % 4) // 2 > 0: # 2, 3, 6, 8
+                delta[1] *= -1
+            else: 
+                pass                
+            if i % 2 == 0:
+                pass
+            else: # 1, 3, 5, 7
+                delta[2] *= -1
+            pos = np.dot(delta, bbox_axis)
+            if pos[2] < min_height:
+                min_height = pos[2]
+
+        return min_height
+
     def switch_respondable_to_bbox(self, is_bbox):
         if is_bbox:
             self.respondable = self.bbox
@@ -805,8 +890,42 @@ class AssemblePart(object):
     """
     def __init__(self, assembled_part: Shape):
         self.respondable = assembled_part
+        self.respondable.set_mass(0.01)
         self.sub_parts = self._get_sub_parts()
         self.used_fn = []
+
+    def get_height(self, relative_to=None):
+        """get current height relative to world coordinate
+        """
+        bbox = self.respondable.get_bounding_box()
+        m = self.respondable.get_matrix()
+        bbox_axis = [
+            [m[0], m[4], m[8]], # x 
+            [m[1], m[5], m[9]], # y
+            [m[2], m[6], m[10]] # z
+        ]
+        bbox_axis = np.array(bbox_axis)
+        object_pos = np.array(self.respondable.get_position(relative_to=relative_to))
+        min_height = np.inf
+        for i in range(8):
+            delta = np.array([bbox[1], bbox[3], bbox[5]])
+            if i // 4 == 0: 
+                pass
+            else: # 4,5,6,7
+                delta[0] *= -1
+            if (i % 4) // 2 > 0: # 2, 3, 6, 8
+                delta[1] *= -1
+            else: 
+                pass                
+            if i % 2 == 0:
+                pass
+            else: # 1, 3, 5, 7
+                delta[2] *= -1
+            pos = np.dot(delta, bbox_axis)
+            if pos[2] < min_height:
+                min_height = pos[2]
+
+        return min_height
 
     def get_bbox(self):
         bbox = self.respondable.get_bounding_box()
@@ -931,6 +1050,17 @@ class Robot(object):
         for robot in self.robots:
             robot.set_random_pose()
 
+    def randomize_ee_pose(self, pr):
+        for robot in self.robots:
+            random_position = robot.get_random_ee_pose()
+            random_orientation = np.random.rand(3) * np.pi
+            robot.move_to_target_pose(pr, target_position=random_position,
+                                      )#target_orientation=random_orientation)
+
+    def reset(self):
+        for robot in self.robots:
+            robot.reset()
+
 class TextureManager(object):
     def __init__(self, process_id, pr):
         self.process_id = process_id
@@ -982,7 +1112,7 @@ class TextureManager(object):
         rand_texture_path = texture_path
         return rand_texture_path
 
-    def _get_grad_randomized_texture(self, texture_path, refer=None):
+    def _get_grad_randomized_texture(self, texture_path, refer):
         """create randomize texture in scene
         1. get random gray texture from texture file list
         2. get two random color(can be refer)
