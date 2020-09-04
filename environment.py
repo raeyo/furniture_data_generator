@@ -1153,6 +1153,7 @@ class TextureManager(object):
             rand_texture_path = self._get_grad_randomized_texture(rand_texture_path, refer=refer)
         elif texture_type == TextureType.mixed_texture:
             rand_texture_path = self._get_mixed_randomized_teuxture(rand_texture_path)#TODO:jsjs
+            # rand_texture_path = jsjs_texture_path
 
         texture = False
         while type(texture) == bool:
