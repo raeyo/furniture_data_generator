@@ -542,7 +542,8 @@ class DREnv(object):
         self.logger.info("start to reset scene")
         self.texture_manager.reset()
         self.camera_manager.reset()
-        
+        self.camera_manager.set_activate(False)
+
         for distractor in self.distractor:
             distractor.remove()
         self.distractor = []
@@ -551,7 +552,7 @@ class DREnv(object):
             box.remove()
         self.scene_boxes = []
 
-        # if opposed_mode => distractor, camera location is opposed
+        # if opposed_mode => camera location is opposed
         if np.random.rand() < 0.5:
             self._opposed_mode = True
         else:
@@ -568,9 +569,8 @@ class DREnv(object):
             self._is_occ = False
         
         self._randomize_furniture()
-        
         self.randomize_scene()
-        
+               
         self.camera_manager.set_activate(True)
         self.set_stable()
         self.logger.info("End to reset scene")
@@ -588,7 +588,21 @@ class DREnv(object):
                 self._randomize_furniture()
             self.pr.step()
             count += 1
-        
+            
+    def step(self):
+        """
+        1. randomize furniture pose
+        2. randomize camera pose
+        3. (opt)randomize robot pose
+        """
+        #TODO: randomize furniture pose
+        fn = random.choice(self.scene_assembled + self.scene_furniture)
+        self._randomize_furniture_pose(fn)
+        self.logger.debug("start one step")
+        self._randomize_camera()
+        self.set_stable()
+        self.logger.debug("end one step")
+
     def camera_test(self):
         defalut_view_point = self.workspace
         self.camera_manager.set_rotation_base_to(defalut_view_point)
@@ -604,21 +618,6 @@ class DREnv(object):
         for i in range(100):
             fn = random.choice(self.scene_furniture+self.scene_assembled)
             self._randomize_furniture_pose(fn)
-
-    def step(self):
-        """
-        1. randomize furniture pose
-        2. randomize camera pose
-        3. (opt)randomize robot pose
-        """
-        #TODO: randomize furniture pose
-        scene_fns = self.scene_assembled + self.scene_furniture
-        fn = random.choice(scene_fns)
-        self._randomize_furniture_pose(fn)
-        self.logger.debug("start one step")
-        self._randomize_camera()
-        self.set_stable()
-        self.logger.debug("end one step")
 
     def shutdown(self):
         self.pr.stop()

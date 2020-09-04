@@ -13,7 +13,7 @@ class CameraInfo():
 
 class CameraType(Enum):
     # Azure = CameraInfo([2048, 1536], 90, [87, 93])
-    Azure = CameraInfo([1024, 768], 90, [87, 93])
+    Azure = CameraInfo([1280, 720], 90, [87, 93])
     Zivid_ML = CameraInfo([1920, 1200], 33, [30, 42])
     Zivid_M = CameraInfo([1920, 1200], 33, [30, 36])
 
@@ -45,7 +45,6 @@ class CameraManager(object):
     def reset(self):
         #TODO: randomize rotation base
         self.controller.set_pose(self._initial_pose, relative_to=self.rot_base)
-        self.set_activate(False)
         
     def _set_perspective_angle(self, angle):
         self.main_camera.set_perspective_angle(angle)
