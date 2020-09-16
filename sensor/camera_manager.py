@@ -12,11 +12,11 @@ class CameraInfo():
         self.angle_range = angle_range
 
 class CameraType(Enum):
-    # Azure = CameraInfo([2048, 1536], 90, [87, 93])
-    Azure = CameraInfo([1280, 720], 90, [87, 93])
+    # Azure = CameraInfo([2048, 1536], 90, [87, 93]) 4:3
+    
+    Azure = CameraInfo([1280, 720], 90, [87, 93]) # 16:9
     Zivid_ML = CameraInfo([1920, 1200], 33, [30, 42])
     Zivid_M = CameraInfo([1920, 1200], 33, [30, 36])
-
 
 class CameraManager(object):
     """
@@ -34,16 +34,16 @@ class CameraManager(object):
         self._perspective_angle = camera_type.value.perspective_angle
         self._pangle_range = camera_type.value.angle_range
 
-        #TODO: changing by labeling type
+        # changing by labeling type
         self.main_camera = MyCamera("main", self._resolution)
         self.seg_camera = MyCamera("seg_mask", self._resolution)
         self.hole_camera = MyCamera("hole_mask", self._resolution)
         self.asm_camera = MyCamera("asm_mask", self._resolution)
-        #TODO: check before data generate(in scene)
+        # check before data generate(in scene)
         self._initial_pose = self.controller.get_pose(relative_to=self.rot_base)
 
     def reset(self):
-        #TODO: randomize rotation base
+        # randomize rotation base
         self.controller.set_pose(self._initial_pose, relative_to=self.rot_base)
         
     def _set_perspective_angle(self, angle):
@@ -84,7 +84,7 @@ class CameraManager(object):
         self.hole_camera.set_activate(is_activate)
         self.asm_camera.set_activate(is_activate)
 
-    #TODO: changing by labeling
+    # changing by labeling
     def capture(self):
         self.main_rgb, self.main_depth = self.main_camera.get_image()
         self.seg_rgb, _ = self.seg_camera.get_image("rgb")

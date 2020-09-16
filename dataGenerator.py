@@ -80,7 +80,7 @@ class Generator(object):
         if not os.path.isdir(self.save_path):
             os.makedirs(self.save_path, exist_ok=True)
 
-        #TODO: data save path
+        # data save path
         self.rgb_dir = join(self.save_path, "rgb")
         check_and_create_dir(self.rgb_dir)
         self.depth_dir = join(self.save_path, "depth_value")
@@ -120,8 +120,25 @@ class Generator(object):
             self.logger.error("No save directory")
 
     def run_episode(self):
-        furniture_num = np.random.randint(1, 4) # 1, 2, 3
-        assembly_num = 1
+        """randomize part
+        1. only one primitive part: 0.45
+        2. only one assembly part: 0.2
+        3. many primitive part: 0.25
+        4. one assembly part + other parts: 0.1
+        """
+        random_value = np.random.rand()
+        if random_value < 0.45:
+            furniture_num = 1
+            assembly_num = 0
+        elif 0.45 < random_value < 0.65:
+            furniture_num = 0
+            assembly_num = 1
+        elif 0.65 < random_value < 0.9:
+            furniture_num = np.random.randint(2, 7) # 2, 3, 4, 5, 6 
+            assembly_num = 0
+        else:
+            furniture_num = np.random.randint(1, 4) # 1, 2, 3 
+            assembly_num = 1
         self.furniture_num = furniture_num
         self.env.reset(assembly_num, furniture_num)
         for i in range(self.ep_length):
@@ -146,12 +163,12 @@ if __name__ =="__main__":
     parser.add_argument("--headless", action='store_true', help='no gui if true')
     # data generate setting
     parser.add_argument("--max_fn_num", type=int, default=2, help="maximum furniture number per scene")
-    parser.add_argument("--max_img_num", type=int, default=10000, help="maximum image number")
-    parser.add_argument("--ep_length", type=int, default=10, help="number of episode")
+    parser.add_argument("--max_img_num", type=int, default=200, help="maximum image number")
+    parser.add_argument("--ep_length", type=int, default=5, help="number of episode")
     # parser.add_argument("--save_root", type=str, default="/SSD1/joo/Dataset/furniture", help="saving directory root")
     parser.add_argument("--save_root", type=str, default="/home/raeyo/data_set", help="saving directory root")
     
-    parser.add_argument("--dataset_ver", type=int, default=17, help="saving directory")
+    parser.add_argument("--dataset_ver", type=int, default=20, help="saving directory")
     args = parser.parse_args()
 
     # logger
