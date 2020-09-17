@@ -17,6 +17,8 @@ from robot.mypanda import MyPanda
 from externApi.fileApi import *
 from externApi.imageProcessApi import *
 
+from timeout import timeout
+
 import cv2
 
 #TODO:add intermidiate parts
@@ -490,6 +492,7 @@ class DREnv(object):
         self.pr.step()
 
     def _randomize_furniture_pose(self, fn):
+        self.logger.debug("start to randomize pose furniture")
         fn.set_respondable(False)
         self.pr.step()
         collision_state = True
@@ -497,13 +500,13 @@ class DREnv(object):
         while collision_state and count < 5:
             self._randomize_furniture_rotation(fn)
             self._randomize_furniture_position(fn)
-            
+            self.logger.debug(f"check furniture collision {count}")
             collision_state = self._check_collision(fn.respondable)
             count += 1
         print("-"*20)
         if collision_state:
             current_pos = fn.get_position()
-            current_pos[2] += 10
+            current_pos[2] += 4
             fn.set_position(current_pos)
         fn.set_respondable(True)
         self.pr.step()
@@ -529,8 +532,11 @@ class DREnv(object):
         self.pr.step()
         self.logger.debug("end to randomize furniture")
 
+    @timeout(10)
     def _check_collision(self, obj, is_box=False):
         is_collision = False
+        name = obj.get_name()
+        self.logger.debug(f"start to check {name} collision")
         for c_obj in self.collision_objects + self.distractor + self.scene_boxes:
             if is_box:
                 if c_obj in self.collision_objects:
@@ -539,6 +545,7 @@ class DREnv(object):
             if c_obj.check_collision(obj):
                 is_collision = True
                 print(c_obj.get_name())
+                self.logger.debug(f"end to check {name} collision")
                 return is_collision
         
         for f_obj in self.scene_furniture + self.scene_assembled:
@@ -548,8 +555,9 @@ class DREnv(object):
             if res.check_collision(obj):
                 is_collision = True
                 print(res.get_name())
+                self.logger.debug(f"end to check {name} collision")
                 return is_collision
-
+        self.logger.debug(f"end to check {name} collision")
         return is_collision
 
    

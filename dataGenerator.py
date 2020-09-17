@@ -163,7 +163,7 @@ if __name__ =="__main__":
     parser.add_argument("--headless", action='store_true', help='no gui if true')
     # data generate setting
     parser.add_argument("--max_fn_num", type=int, default=2, help="maximum furniture number per scene")
-    parser.add_argument("--max_img_num", type=int, default=200, help="maximum image number")
+    parser.add_argument("--max_img_num", type=int, default=10000, help="maximum image number")
     parser.add_argument("--ep_length", type=int, default=5, help="number of episode")
     # parser.add_argument("--save_root", type=str, default="/SSD1/joo/Dataset/furniture", help="saving directory root")
     parser.add_argument("--save_root", type=str, default="/home/raeyo/data_set", help="saving directory root")
@@ -177,8 +177,8 @@ if __name__ =="__main__":
     streamHandler = logging.StreamHandler()
     streamHandler.setFormatter(formatter)
     logger.addHandler(streamHandler)
-    logger.setLevel(level=logging.INFO)
-    # logger.setLevel(level=logging.DEBUG)
+    # logger.setLevel(level=logging.INFO)
+    logger.setLevel(level=logging.DEBUG)
     
 
     save_dir = "SIM_dataset_v" + str(args.dataset_ver)
