@@ -503,7 +503,6 @@ class DREnv(object):
             self.logger.debug(f"check furniture collision {count}")
             collision_state = self._check_collision(fn.respondable)
             count += 1
-        print("-"*20)
         if collision_state:
             current_pos = fn.get_position()
             current_pos[2] += 4
@@ -544,7 +543,7 @@ class DREnv(object):
             
             if c_obj.check_collision(obj):
                 is_collision = True
-                print(c_obj.get_name())
+                # print(c_obj.get_name())
                 self.logger.debug(f"end to check {name} collision")
                 return is_collision
         
@@ -554,7 +553,7 @@ class DREnv(object):
                 continue
             if res.check_collision(obj):
                 is_collision = True
-                print(res.get_name())
+                # print(res.get_name())
                 self.logger.debug(f"end to check {name} collision")
                 return is_collision
         self.logger.debug(f"end to check {name} collision")
@@ -1192,7 +1191,6 @@ class TextureManager(object):
         mix_texture = np.vstack(mix_texture)
         save_path = os.path.join(TextureType.mixed_texture.value, 'mix_texture_' + str(self.process_id) + '.png')
         cv2.imwrite(save_path, mix_texture)
-        print(save_path)
         return save_path
 
     def _get_grad_randomized_texture(self, texture_path, refer):
