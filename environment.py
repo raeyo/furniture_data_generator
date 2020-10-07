@@ -21,8 +21,6 @@ from timeout import timeout
 
 import cv2
 
-#TODO:add intermidiate parts
-
 # path
 class TextureType(Enum):
     gray_texture = "./textures/gray_textures/"
@@ -215,6 +213,34 @@ class DREnv(object):
             self._fn_color = [0.95, 0.95, 0.95] # white
             self._wood_color = [0.9, 0.7, 0.5]
         
+        elif dataset_ver == 21:
+            """
+            1. camera z: 0.1 -> 0.2
+            2. add 1 part data
+            3. fix box z position
+            """ 
+            # light randomize config
+            self._max_n_light = 3 # the number of point lights 2 ~ 3
+            # camera randomize config
+            self._camera_range = [(-0.8, 0.55, 0.2), (0.8, 0.7, 1.4)] # relative to self.workspace
+            self.camera_type = CameraType.Azure
+            # workspace config
+            self._workspace_range = [(-0.4, -0.2), (0.4, 0.2)] # furniture (x, y) value based on self.workspace
+            self._table_distractor_range = [(-0.55, -0.4), (0.55, 0.4)] # distractor (x, y) value based on self.workspace
+            self._light_range = [(-4, -4), (4, 4)]
+            # robot number
+            self._gripper_robot_num = 1
+            self._no_gripper_robot_num = 2
+            # stochastic config
+            self._fn_occ = 0.5
+            self._fn_flip_val = 0.5
+            self._robot_randomize_val = 0.1 # np.random.rand() > self._robot_randomize_val: -> pass
+            self._distractor_outer = 0.7
+            # furniture texture color reference
+            self._fn_color = [0.95, 0.95, 0.95] # white
+            self._wood_color = [0.9, 0.7, 0.5]
+        
+
 
         else:
             print("error")
@@ -236,6 +262,12 @@ class DREnv(object):
 
         asm_bases = Dummy("assembly_parts").get_objects_in_tree(ObjectType.SHAPE, exclude_base=True, first_generation_only=True)
         self.assembly_parts = [AssemblePart(asm_base) for asm_base in asm_bases]
+        self.min_asm_num, self.max_asm_num = np.inf, -np.inf
+        for asm_part in self.assembly_parts:
+            if asm_part.asm_num < self.min_asm_num:
+                self.min_asm_num = asm_part.asm_num
+            if asm_part.asm_num > self.max_asm_num:
+                self.max_asm_num = asm_part.asm_num
 
         self.scene_furniture = []
         self.scene_assembled = []
@@ -272,9 +304,7 @@ class DREnv(object):
         self.distractor = []  
 
         # box
-        self.boxes = [Shape("box_A"), Shape("box_B")]
-        self.scene_boxes = []
-        self.min_box_num, self.max_box_num = 3, 6
+        self.scene_boxes = [Shape("sub_table0"), Shape("sub_table1"), Shape("sub_table2"), Shape("sub_table3")]
         self._box_color = [0.99, 0.99, 0.99]
         self.segmentation_dummy = Dummy("segmentation")
 
@@ -361,28 +391,20 @@ class DREnv(object):
 
     #region scene randomize
     def _randomize_boxes(self):
-        num = np.random.randint(self.min_box_num, self.max_box_num + 1)
-        for i in range(num):
-            box = random.choice(self.boxes)
-            cp_box = box.copy()
-            cp_box.set_parent(self.segmentation_dummy)
-            self.scene_boxes.append(cp_box)        
-
         for box in self.scene_boxes:
-            collision_state = True
-            count = 0
+            # collision_state = True
+            # count = 0
 
-            while collision_state and count < 5:
-                position = list(np.random.uniform(self._workspace_range[0], self._workspace_range[1]))
-                position += [0.07 - 0.16]
-                rand_ori = [0, 0] + [np.random.rand() * np.pi]
-                box.set_position(position, relative_to=self.workspace)
-                box.set_orientation(rand_ori)
-                self.pr.step()
-                collision_state = self._check_collision(box, is_box=True)
-                count += 1
-
-            self.set_auxiliary_color(box, [0,0,1])
+            # while collision_state and count < 5:
+            #     position = list(np.random.uniform(self._workspace_range[0], self._workspace_range[1]))
+            #     position += [0.07 - 0.16]
+            #     rand_ori = [0, 0] + [np.random.rand() * np.pi]
+            #     box.set_position(position, relative_to=self.workspace)
+            #     box.set_orientation(rand_ori)
+            #     self.pr.step()
+            #     collision_state = self._check_collision(box, is_box=True)
+            #     count += 1
+            # self.set_auxiliary_color(box, [0,0,1])
             self.texture_manager.set_random_texture(box, TextureType.gray_texture, refer=self._box_color)
 
     def _randomize_light(self):
@@ -443,7 +465,17 @@ class DREnv(object):
         for fn in self.furnitures:
             fn.reset()
         
-        self.scene_assembled = random.sample(self.assembly_parts, asm_num)
+        self.scene_assembled = []
+        for i in range(asm_num):
+            choosed_num = np.random.randint(self.min_asm_num, self.max_asm_num + 1)
+            while True:
+                choosed_part = random.choice(self.assembly_parts)
+                if choosed_part.asm_num == choosed_num:
+                    self.scene_assembled.append(choosed_part)
+                    break
+                else:
+                    continue
+
         #TODO: if impossible to assemble
         for asm in self.scene_assembled:
             _ = asm.activate(self.furnitures)
@@ -636,11 +668,7 @@ class DREnv(object):
         for distractor in self.distractor:
             distractor.remove()
         self.distractor = []
-
-        for box in self.scene_boxes:
-            box.remove()
-        self.scene_boxes = []
-
+        
         # if opposed_mode => camera location is opposed
         if np.random.rand() < 0.5:
             self._opposed_mode = True
@@ -967,6 +995,7 @@ class AssemblePart(object):
         self.respondable.set_mass(0.01)
         self.sub_parts = self._get_sub_parts()
         self.used_fn = []
+        self.asm_num = len(self.sub_parts)
 
     def get_height(self, relative_to=None):
         """get current height relative to world coordinate
