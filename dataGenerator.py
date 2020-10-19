@@ -11,8 +11,9 @@ import pickle
 import logging
 import cv2
 
-from environment import DREnv
+from environment import DREnv, TableTextureType, WoodTextureType
 from externApi.fileApi import *
+import random
 
 class Generator(object):
 
@@ -59,10 +60,18 @@ class Generator(object):
         # logger
         self.logger = logger
 
+        # furniture num
+        self.furniture_num = 0
+        self.assembly_num = 0
+
     def _set_img_name(self):
         now = datetime.now()
         timestamp = datetime.timestamp(now)
-        self.img_name = "{}_ep_{}_img_{}_part_{}_{}.png".format(self.process_id, self.ep_num, self.img_num, self.furniture_num, timestamp)
+        self.img_name = "fn{}_asm{}_{}_and_{}_time{}.png".format(self.furniture_num,
+                                                                 self.assembly_num,
+                                                                 self.table_texture.name,
+                                                                 self.wood_texture.name,
+                                                                 timestamp)
 
     def _is_ended(self):
         if self.img_num < self.img_max:
@@ -121,26 +130,29 @@ class Generator(object):
 
     def run_episode(self):
         """randomize part
-        1. only one primitive part: 0.45
-        2. only one assembly part: 0.2
+        1. only one primitive part: 0.25
+        2. only one assembly part: 0.25
         3. many primitive part: 0.25
-        4. one assembly part + other parts: 0.1
+        4. one assembly part + other parts: 0.25
         """
         random_value = np.random.rand()
-        if random_value < 0.45:
+        if random_value < 0.25:
             furniture_num = 1
             assembly_num = 0
-        elif 0.45 < random_value < 0.65:
+        elif 0.25 < random_value < 0.5:
             furniture_num = 0
             assembly_num = 1
-        elif 0.65 < random_value < 0.9:
+        elif 0.5 < random_value < 0.75:
             furniture_num = np.random.randint(2, 7) # 2, 3, 4, 5, 6 
             assembly_num = 0
         else:
             furniture_num = np.random.randint(1, 4) # 1, 2, 3 
             assembly_num = 1
         self.furniture_num = furniture_num
-        self.env.reset(assembly_num, furniture_num)
+        self.assembly_num = assembly_num
+        self.table_texture = random.choice(list(TableTextureType))
+        self.wood_texture = random.choice(list(WoodTextureType))
+        self.env.reset(assembly_num, furniture_num, self.table_texture, self.wood_texture)
         for i in range(self.ep_length):
             self.env.step()
             # self.env.test_align()
@@ -168,7 +180,7 @@ if __name__ =="__main__":
     # parser.add_argument("--save_root", type=str, default="/SSD1/joo/Dataset/furniture", help="saving directory root")
     parser.add_argument("--save_root", type=str, default="/home/raeyo/data_set", help="saving directory root")
     
-    parser.add_argument("--dataset_ver", type=int, default=21, help="saving directory")
+    parser.add_argument("--dataset_ver", type=int, default=22, help="saving directory")
     args = parser.parse_args()
 
     # logger
