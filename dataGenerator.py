@@ -9,7 +9,6 @@ import sys
 import argparse
 import pickle
 import logging
-import cv2
 
 from environment import DREnv, TableTextureType, WoodTextureType
 from externApi.fileApi import *
@@ -180,7 +179,7 @@ if __name__ =="__main__":
     # parser.add_argument("--save_root", type=str, default="/SSD1/joo/Dataset/furniture", help="saving directory root")
     parser.add_argument("--save_root", type=str, default="/home/raeyo/data_set", help="saving directory root")
     
-    parser.add_argument("--dataset_ver", type=int, default=22, help="saving directory")
+    parser.add_argument("--dataset_ver", type=int, default=23, help="saving directory")
     args = parser.parse_args()
 
     # logger

@@ -277,13 +277,39 @@ class DREnv(object):
             self._fn_color = [0.95, 0.95, 0.95] # white
             self._wood_color = [0.9, 0.7, 0.5]
         
-
+        elif dataset_ver == 23:
+            """
+            1. use same texture for all furniture
+            2. table texture -> black
+            
+            """ 
+            # light randomize config
+            self._max_n_light = 3 # the number of point lights 2 ~ 3
+            # camera randomize config
+            self._camera_range = [(-0.8, 0.55, 0.2), (0.8, 0.7, 1.4)] # relative to self.workspace
+            self.camera_type = CameraType.Azure
+            # workspace config
+            self._workspace_range = [(-0.4, -0.2), (0.4, 0.2)] # furniture (x, y) value based on self.workspace
+            self._table_distractor_range = [(-0.55, -0.4), (0.55, 0.4)] # distractor (x, y) value based on self.workspace
+            self._light_range = [(-4, -4), (4, 4)]
+            # robot number
+            self._gripper_robot_num = 3
+            self._no_gripper_robot_num = 0
+            # stochastic config
+            self._fn_occ = 0.5
+            self._fn_flip_val = 0.5
+            self._robot_randomize_val = 0.1 # np.random.rand() > self._robot_randomize_val: -> pass
+            self._distractor_outer = 0.7
+            # furniture texture color reference
+            self._fn_color = [0.95, 0.95, 0.95] # white
+            self._wood_color = [0.9, 0.7, 0.5]
+        
         else:
             print("error")
             exit()
             
         # static scene
-        self.scene = "./scene/assembly_env_Azure"
+        self.scene = "./scene/assembly_env_SNU"
         self._initialize_scene(self.scene, headless=headless)
 
         # get scene objects
@@ -331,8 +357,8 @@ class DREnv(object):
         
         # robot
         self.logger.debug("initialize robot")
-        self.robot = Robot(self._gripper_robot_num, self._no_gripper_robot_num)
-        self.collision_objects += self.robot.respondable
+        self.robot_manager = RobotManager(self._gripper_robot_num, self._no_gripper_robot_num)
+        self.collision_objects += self.robot_manager.respondable
 
         # distractor 1~5
         self.distractor_bases = [Shape("workspace_C"), Shape("workspace_D")]
@@ -354,7 +380,6 @@ class DREnv(object):
         
         self.table_texture_type = random.choice(list(TableTextureType))
         self.table_texture = self.texture_manager.get_randomize_texture(self.table_texture_type.value, refer=self._table_color)
-
 
     def _initialize_scene(self, scene_file, headless):
         if type(scene_file) == str:
@@ -480,9 +505,9 @@ class DREnv(object):
     
     def _randomize_robot(self):
         # randomize pose
-        self.robot.randomize_pose()
+        self.robot_manager.randomize_pose()
         # randomize texture
-        for vis in self.robot.visible:
+        for vis in self.robot_manager.visible:
             if np.random.rand() > self._robot_randomize_val:
                 continue
             self.texture_manager.set_random_texture(vis, TextureType.gray_texture)
@@ -1150,7 +1175,7 @@ class AssemblePart(object):
         else:
             return False
         
-class Robot(object):
+class RobotManager(object):
     def __init__(self, gripper_robot_num=1, no_gripper_num=2):
         self.robots = [MyPanda(i) for i in range(gripper_robot_num)]
         self.robots += [MyPanda(i, is_gripper=False) for i in range(no_gripper_num)]
