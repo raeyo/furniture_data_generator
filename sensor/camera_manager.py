@@ -74,6 +74,8 @@ class CameraManager(object):
         noise_pos = list(np.random.rand(3)/10)
         self.rot_base.set_position(noise_pos, relative_to=self.rot_base)
 
+    def set_rotation_base_position(self, position, relative_to=None):
+        self.rot_base.set_position(position, relative_to=relative_to)
 
     def set_position(self, position, relative_to=None):
         self.controller.set_position(position, relative_to=relative_to)
