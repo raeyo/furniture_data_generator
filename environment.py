@@ -5,46 +5,20 @@ from pyrep.backend import sim
 from pyrep.objects.dummy import Dummy
 
 import os
-from os.path import join
 import random
 import numpy as np
-from enum import Enum
 
 from sensor.camera_manager import CameraManager, CameraType
 from sensor.light import Light
-from robot.mypanda import MyPanda
 
 from externApi.fileApi import *
 from externApi.imageProcessApi import *
 
+from environment_manager import *
+from scene_object import *
+from const import *
+
 from timeout import timeout
-
-import cv2
-
-# path
-class TextureType(Enum):
-    gray_texture = "./textures/gray_textures/"
-    wood_texture = "./textures/wood_textures/"
-    crawled_texture = "./textures/crawled_textures_crop/"
-    mixed_texture = "./textures/mixed_crawled_textures/" 
-
-class ArrangeType(Enum):
-    align = 0
-                
-shape_type = [PrimitiveShape.CUBOID,
-              PrimitiveShape.SPHERE,
-              PrimitiveShape.CYLINDER,
-              PrimitiveShape.CONE,]
-
-
-# randomize parameter
-class TableTextureType(Enum):
-    black = TextureType.gray_texture
-    mixed = TextureType.mixed_texture
-
-class WoodTextureType(Enum):
-    wood = TextureType.wood_texture
-    nowood = TextureType.gray_texture
 
 class DREnv(object):
     
@@ -279,14 +253,38 @@ class DREnv(object):
         
         elif dataset_ver == 23:
             """
-            1. use same texture for all furniture
-            2. table texture -> black
-            
+            for grasping dataset
             """ 
             # light randomize config
             self._max_n_light = 3 # the number of point lights 2 ~ 3
             # camera randomize config
-            self._camera_range = [(-0.8, 0.55, 0.2), (0.8, 0.7, 1.4)] # relative to self.workspace
+            self._camera_range = CameraLocation # related to world frame
+            self.camera_type = CameraType.Azure
+            # workspace config
+            self._workspace_range = [(-0.4, -0.2), (0.4, 0.2)] # furniture (x, y) value based on self.workspace
+            self._table_distractor_range = [(-0.55, -0.4), (0.55, 0.4)] # distractor (x, y) value based on self.workspace
+            self._light_range = [(-4, -4), (4, 4)]
+            # robot number
+            self._gripper_robot_num = 3
+            self._no_gripper_robot_num = 0
+            # stochastic config
+            self._fn_occ = 0.5
+            self._fn_flip_val = 0.5
+            self._robot_randomize_val = 0.1 # np.random.rand() > self._robot_randomize_val: -> pass
+            self._distractor_outer = 0.7
+            # furniture texture color reference
+            self._fn_color = [0.95, 0.95, 0.95] # white
+            self._wood_color = [0.9, 0.7, 0.5]
+        
+        elif dataset_ver == 24:
+            """
+            normal dataset
+            use CameraLocation, ViewType to randomize camera
+            """ 
+            # light randomize config
+            self._max_n_light = 3 # the number of point lights 2 ~ 3
+            # camera randomize config
+            self._camera_range = CameraLocation # related to world frame
             self.camera_type = CameraType.Azure
             # workspace config
             self._workspace_range = [(-0.4, -0.2), (0.4, 0.2)] # furniture (x, y) value based on self.workspace
@@ -307,7 +305,7 @@ class DREnv(object):
         else:
             print("error")
             exit()
-            
+        
         # static scene
         self.scene = "./scene/assembly_env_SNU"
         self._initialize_scene(self.scene, headless=headless)
@@ -381,6 +379,13 @@ class DREnv(object):
         self.table_texture_type = random.choice(list(TableTextureType))
         self.table_texture = self.texture_manager.get_randomize_texture(self.table_texture_type.value, refer=self._table_color)
 
+        # grasp workspace
+        self.grasp_workspace = Shape("workspace_grasp")
+        self.grasp_range = [(-0.2, -0.1), (0.2, 0.1)]
+        
+        # world frame
+        self.world_frame = Dummy("world_frame")
+
     def _initialize_scene(self, scene_file, headless):
         if type(scene_file) == str:
             scene_file = scene_file + ".ttt"
@@ -397,7 +402,7 @@ class DREnv(object):
             scale = 0.04
             xy_position=self.workspace.get_position()[:2]
             for i in range(num):
-                sh_type = random.choice(shape_type)
+                sh_type = random.choice(list(PrimitiveShape))
                 size = list((np.random.rand(3) + 1) * scale)
                 position = xy_position + [0]
                 dis_sh = Shape.create(type=sh_type, 
@@ -412,7 +417,7 @@ class DREnv(object):
             scale = 1
             xy_position=self.distractor_bases[0].get_position()[:2]
             for i in range(num):
-                sh_type = random.choice(shape_type)
+                sh_type = random.choice(list(PrimitiveShape))
                 size = list((np.random.rand(3) + 1) * scale)
                 position = xy_position + [size[2]]
                 dis_sh = Shape.create(type=sh_type, 
@@ -655,7 +660,6 @@ class DREnv(object):
         self.logger.debug(f"end to check {name} collision")
         return is_collision
 
-   
     def get_rotation_axis(self, obj):
         bbox = obj.get_bounding_box()
         xyz = [bbox[1], bbox[3], bbox[5]]
@@ -684,22 +688,26 @@ class DREnv(object):
     
     #endregion
 
-    def _randomize_camera(self):
+    def randomize_camera(self, view_type: CameraViewType, location: CameraLocation):
+        """
+        case1. view grasping workspace and camera top or side
+
+        """
         self.logger.debug("start randomize camera pose")
         # randomize view point
-        defalut_view_point = self.workspace
-        self.camera_manager.set_rotation_base_to(defalut_view_point)
+        view_range = view_type.value
+        view_point = list(np.random.uniform(view_range[0], view_range[1]))
+        self.camera_manager.set_rotation_base_position(view_point, relative_to=self.world_frame)
 
         # randomize position
-        random_position = list(np.random.uniform(self._camera_range[0], self._camera_range[1]))
-        if self._opposed_mode:
-            random_position[1] *= -1
+        camera_range = location.value
+        random_position = list(np.random.uniform(camera_range[0], camera_range[1]))
+        self.camera_manager.set_position(random_position, self.world_frame)
         
-        self.camera_manager.set_position(random_position, self.workspace)
-
         # randomize perspective angle
-        
         self.camera_manager.set_random_angle()
+        
+        self.pr.step()
 
         self.logger.debug("end randomize camera pose")
 
@@ -708,7 +716,7 @@ class DREnv(object):
         for fn in self.scene_furniture + self.scene_assembled:
             fn.set_dynamic(True)
         self.pr.step()
-        for i in range(3):
+        for i in range(10):
             self.pr.step()
         for fn in self.scene_furniture + self.scene_assembled:
             fn.set_dynamic(False)
@@ -754,7 +762,7 @@ class DREnv(object):
         self._sample_furnitures(assembly_num, furniture_num)
         self._randomize_furniture()
                
-        self.camera_manager.set_activate(True)
+        
         self.set_stable()
         self.logger.info("End to reset scene")
 
@@ -767,7 +775,6 @@ class DREnv(object):
         fn = random.choice(self.scene_assembled + self.scene_furniture)
         self._randomize_furniture_pose(fn)
         self.logger.debug("start one step")
-        self._randomize_camera()
         self.set_stable()
         self.logger.debug("end one step")
 
@@ -786,633 +793,71 @@ class DREnv(object):
 
         return self.camera_manager.get_images()
 
-class SceneObject(object):
-    def __init__(self, scene_obj, class_id=-1):
-        self.visible = scene_obj
-        self.respondable = self.visible
-        self.class_id = class_id
-        self.set_dynamic(False)
-        self.set_respondable(False)
-        self.set_renderable(True)
-
-    def _extract_respondable_part(self):
-        try:
-            respondable = self.visible.get_convex_decomposition()
-        except:
-            respondable = self.visible.copy()
-        respondable.set_renderable(False)
-        self._is_extracted = True
+    def move_robot_to_grasp_workspace(self, robot):
         
-        return respondable
-
-    def set_respondable(self, is_respondable):
-        if self.visible == self.respondable and is_respondable:
-            self.respondable = self._extract_respondable_part()
-            self.visible.set_parent(self.respondable)
-        self.respondable.set_respondable(is_respondable)
-        self._is_respondable = is_respondable
-
-    def set_dynamic(self, is_dynamic):
-        self.respondable.set_dynamic(is_dynamic)
-        self._is_dynamic = is_dynamic
-    
-    def set_renderable(self, is_renderable):
-        self.visible.set_renderable(is_renderable)
-        self._is_renderable = is_renderable
-
-    def set_detectable(self, is_detectable):
-        self.visible.set_detectable(is_detectable)
-        self._is_detectable = is_detectable
-
-    def set_collidable(self, is_collidable):
-        self.respondable.set_dynamic(is_collidable)
-        self._is_dynamic = is_collidable
-
-    def set_position(self, position, relative_to=None):
-        self.respondable.set_position(position, relative_to)
-    def get_position(self, relative_to=None):
-        return self.respondable.get_position(relative_to)
-    
-    def set_orientation(self, orientation, relative_to=None):
-        self.respondable.set_orientation(orientation, relative_to)
-    def get_orientation(self, relative_to=None):
-        return self.respondable.get_orientation(relative_to)
-    
-    def set_pose(self, pose, relative_to=None):
-        self.respondable.set_pose(pose, relative_to)
-    def get_pose(self, relative_to=None):
-        self.respondable.get_pose(relative_to)
-
-    def rotate(self, rotation):
-        self.respondable.rotate(rotation)
-
-    def set_parent(self, parent):
-        self.respondable.set_parent(parent)
-
-    def set_rand_texture(self, texture):
-        mapping_ind = np.random.randint(4)
-        uv_scale = list(np.random.uniform((0, 0), (5, 5)))
-        self.visible.set_texture(texture=texture,
-                                 mapping_mode=TextureMappingMode(mapping_ind),
-                                 uv_scaling=uv_scale,
-                                 repeat_along_u=True,
-                                 repeat_along_v=True)  
-
-    def remove(self):
-        self.visible.remove()
-        if self._is_extracted:
-            self.respondable.remove()
-
-    def rotate_rel(self, rotation, relative_to):
-        relto = relative_to
-        M = self.respondable.get_matrix()
-        m = relto.get_matrix()
-        x_axis = [m[0], m[4], m[8]]
-        y_axis = [m[1], m[5], m[9]]
-        z_axis = [m[2], m[6], m[10]]
-        pos = [m[3], m[7], m[11]]
-        M = sim.simRotateAroundAxis(M, z_axis, pos, rotation[2])
-        M = sim.simRotateAroundAxis(M, y_axis, pos, rotation[1])
-        M = sim.simRotateAroundAxis(M, x_axis, pos, rotation[0])
-        self.respondable.set_matrix(M)
-    
-    def check_collision(self, obj):
-        self.respondable.check_collision(obj)
-
-    @staticmethod
-    def _create_by_CAD(filepath, scaling_factor, class_id, is_texture=False, is_dynamic=True):
-        if is_texture:
-            try:
-                obj = Shape.import_shape(filename=filepath,
-                                         scaling_factor=scaling_factor,)          
-            except:
-                print("error")
-        else:
-            try:
-                obj = Shape.import_mesh(filename=filepath,
-                                        scaling_factor=scaling_factor,)
-            except:
-                print("error")
+        random_position = list(np.random.uniform(self.grasp_range[0], self.grasp_range[1]))
+        random_position += [0]
         
-        return SceneObject(obj, class_id)
-
-class Furniture(object):
-    """
-    respondable_part
-    visible_parts
-    wood_parts
-    hole_parts
-    """
-    def __init__(self, furniture_name):
-        self.name = furniture_name
-        self.respondable = Shape(furniture_name)
-        self.respondable.set_mass(0.01)
-        self.temp_res = self.respondable
-        self.visible_part = Shape(furniture_name + "_visible_tex")
-        self.wood = Shape(furniture_name + "_visible_wood")
-        try:
-            self.hole = Shape(furniture_name + "_hole_visible")
-            self.is_hole = True
-        except:
-            self.hole = None
-            self.is_hole = False
-        self.is_activate = False
-        self._init_parent = self.respondable.get_parent()
-        self.is_assembled = False
-        # self._initialize_bbox()
-
-    def _initialize_bbox(self):
-        bbox = self.respondable.get_bounding_box()
-        ori = self.respondable.get_orientation()
-        position = self.respondable.get_position()
-        xyz = [bbox[1], bbox[3], bbox[5]]
-        size = list(np.array(xyz)*2)
-        self.bbox = Shape.create(type=PrimitiveShape.CUBOID,
-                                 size=size,
-                                 respondable=False,
-                                 renderable=False,
-                                 static=False,
-                                 position=position,
-                                 orientation=ori,
-                                )
-        self.bbox.set_detectable(False)
+        temp_dummy = Dummy.create()
+        temp_dummy.set_position(random_position, relative_to=self.grasp_workspace)
+        target_position = temp_dummy.get_position()
+        robot.move_to_target_pose(self.pr, target_position)
         
-    def get_height(self, relative_to=None):
-        """get current height relative to world coordinate
+        temp_dummy.remove()
+
+    def grasp_random_furniture(self):
         """
-        bbox = self.respondable.get_bounding_box()
-        m = self.respondable.get_matrix()
-        bbox_axis = [
-            [m[0], m[4], m[8]], # x 
-            [m[1], m[5], m[9]], # y
-            [m[2], m[6], m[10]] # z
-        ]
-        bbox_axis = np.array(bbox_axis)
-        object_pos = np.array(self.respondable.get_position(relative_to=relative_to))
-        min_height = np.inf
-        for i in range(8):
-            delta = np.array([bbox[1], bbox[3], bbox[5]])
-            if i // 4 == 0: 
-                pass
-            else: # 4,5,6,7
-                delta[0] *= -1
-            if (i % 4) // 2 > 0: # 2, 3, 6, 8
-                delta[1] *= -1
-            else: 
-                pass                
-            if i % 2 == 0:
-                pass
-            else: # 1, 3, 5, 7
-                delta[2] *= -1
-            pos = np.dot(delta, bbox_axis)
-            if pos[2] < min_height:
-                min_height = pos[2]
+        move furniture to grasping state
+        """
+        robot = self.robot_manager.robots[2]
+        self.move_robot_to_grasp_workspace(robot)
+        # select grasping target furniture
+        self.grasp_furniture = random.choice(self.scene_furniture)
+        self.grasp_furniture.set_dynamic(False)
+        self.pr.step()
 
-        return min_height
-
-    def switch_respondable_to_bbox(self, is_bbox):
-        if is_bbox:
-            self.respondable = self.bbox
-            self.temp_res.set_parent(self.bbox)
+        # move furniture to ee_tip for only possible case
+        is_possible_grasp_point = False
+        grasp_dummy = Dummy.create()
+        self.logger.info("finding possible grasp case...")
+        count = 0
+        while not is_possible_grasp_point and count < 10:
+            self.grasp_furniture.set_parent(None)
+            grasp_pose = self.grasp_furniture.get_random_grasp_pose()
+            grasp_dummy.set_pose(grasp_pose)
+            self.grasp_furniture.set_parent(grasp_dummy)
+            ee_pose = robot.get_ee_pose()
+            grasp_dummy.set_pose(ee_pose)
+            self.pr.step()
+            is_possible_grasp_point = self._check_collision(self.grasp_furniture.respondable)
+            count += 1
+        if not count < 10:
+            self.logger.info("fail to find possible case")
+            grasp_dummy.remove()
+            self.grasp_furniture.set_respondable(False)
+            self.grasp_furniture.reset()
+            return False
+        else:
+            self.logger.info("success to find poosible case")            
+            self.grasp_furniture.set_respondable(True)
+        
+            grasp_state = False
+            while not grasp_state:
+                grasp_state = robot.grasp()
+                self.pr.step()
             
-        else:
-            self.respondable = self.temp_res
-            self.respondable.set_parent(None)
+            self.grasp_furniture.set_parent(robot.ee_tip)
+            robot.set_grasp_base_pose()
+            grasp_dummy.remove()
 
-    def set_rotation_axis(self, height, rot_axis):
-        self.height = height
-        self.rot_axis = rot_axis
-        self._initial_pose = self.respondable.get_pose()
-
-    def set_position(self, position, relative_to=None):
-        self.respondable.set_position(position, relative_to)
-    def get_position(self, relative_to=None):
-        return self.respondable.get_position(relative_to)
-    
-    def set_orientation(self, orientation, relative_to=None):
-        self.respondable.set_orientation(orientation, relative_to)
-    def get_orientation(self, relative_to=None):
-        return self.respondable.get_orientation(relative_to)
-    
-    def set_pose(self, pose, relative_to=None):
-        self.respondable.set_pose(pose, relative_to)
-    def get_pose(self, relative_to=None):
-        self.respondable.get_pose(relative_to)
-
-    def set_respondable(self, is_respondable):
-        self.respondable.set_respondable(is_respondable)
-
-    def rotate(self, rotation):
-        self.respondable.rotate(rotation)
-
-    def set_parent(self, parent):
-        self.respondable.set_parent(parent)
-
-    def check_collision(self, obj):
-        self.respondable.check_collision(obj)
-
-    def set_dynamic(self ,is_dynamic):
-        self.respondable.set_dynamic(is_dynamic)
-
-    def activate(self, is_activate):
-        self.respondable.set_respondable(is_activate)
-        self.visible_part.set_renderable(is_activate)
-        self.wood.set_renderable(is_activate)
-        if self.is_hole:
-            self.hole.set_renderable(is_activate)
-
-    def reset(self):
-        self.respondable.set_pose(self._initial_pose)
-
-    def set_assembled(self, is_assembled):
-        self.activate(is_assembled)
-        self.respondable.set_dynamic(not is_assembled)
-        self.respondable.set_respondable(not is_assembled)
-        self.respondable.set_collidable(not is_assembled)
-        if not is_assembled:
-            self.respondable.set_pose(self._initial_pose)
-            self.set_parent(self._init_parent)
-        self.is_assembled = is_assembled
-        
-class AssemblePart(object):
-    """assembled furnitures
-    assembled part
-    part1
-    part2
-    ...
-
-    """
-    def __init__(self, assembled_part: Shape):
-        self.respondable = assembled_part
-        self.respondable.set_mass(0.01)
-        self.sub_parts = self._get_sub_parts()
-        self.used_fn = []
-        self.asm_num = len(self.sub_parts)
-
-    def get_height(self, relative_to=None):
-        """get current height relative to world coordinate
-        """
-        bbox = self.respondable.get_bounding_box()
-        m = self.respondable.get_matrix()
-        bbox_axis = [
-            [m[0], m[4], m[8]], # x 
-            [m[1], m[5], m[9]], # y
-            [m[2], m[6], m[10]] # z
-        ]
-        bbox_axis = np.array(bbox_axis)
-        object_pos = np.array(self.respondable.get_position(relative_to=relative_to))
-        min_height = np.inf
-        for i in range(8):
-            delta = np.array([bbox[1], bbox[3], bbox[5]])
-            if i // 4 == 0: 
-                pass
-            else: # 4,5,6,7
-                delta[0] *= -1
-            if (i % 4) // 2 > 0: # 2, 3, 6, 8
-                delta[1] *= -1
-            else: 
-                pass                
-            if i % 2 == 0:
-                pass
-            else: # 1, 3, 5, 7
-                delta[2] *= -1
-            pos = np.dot(delta, bbox_axis)
-            if pos[2] < min_height:
-                min_height = pos[2]
-
-        return min_height
-
-    def get_bbox(self):
-        bbox = self.respondable.get_bounding_box()
-        xyz = [bbox[1], bbox[3], bbox[5]]
-        xyz = list(np.array(xyz) *2)
-        bbox = Shape.create(PrimitiveShape.CUBOID, size=xyz)
-        bbox.set_position([0, 0, 0], relative_to=self.respondable)
-        bbox.set_orientation([0, 0, 0], relative_to=self.respondable)
-        bbox.set_renderable(False)
-        bbox.set_detectable(False)
-
-        return bbox
-        
-    def set_rotation_axis(self, height, rot_axis):
-        self.height = height
-        self.rot_axis = rot_axis
-        self._initial_pose = self.respondable.get_pose()
-
-    def set_position(self, position, relative_to=None):
-        self.respondable.set_position(position, relative_to)
-    def get_position(self, relative_to=None):
-        return self.respondable.get_position(relative_to)
-    
-    def set_orientation(self, orientation, relative_to=None):
-        self.respondable.set_orientation(orientation, relative_to)
-    def get_orientation(self, relative_to=None):
-        return self.respondable.get_orientation(relative_to)
-    
-    def set_pose(self, pose, relative_to=None):
-        self.respondable.set_pose(pose, relative_to)
-    def get_pose(self, relative_to=None):
-        self.respondable.get_pose(relative_to)
-
-    def set_respondable(self, is_respondable):
-        self.respondable.set_respondable(is_respondable)
-
-    def rotate(self, rotation):
-        self.respondable.rotate(rotation)
-
-    def _get_sub_parts(self):
-        childs = self.respondable.get_objects_in_tree(ObjectType.SHAPE, exclude_base=True)
-        sub_parts = []
-        for child in childs:
-            name = child.get_name()
-            child_type = name.split("_")[-1]
-            if child_type == "mask":
-                continue
-            sub_parts.append((child, child_type))
-
-        return sub_parts
-
-    def _catch_fn_parts(self, furnitures):
-        # pose는 0000000 이면 안됨
-        self.used_fn = []
-        for part, pt_name in self.sub_parts:
-            is_exist = False
-            for fn in furnitures:
-                if fn.is_assembled:
-                    continue
-                if pt_name in fn.name:
-                    is_exist = True
-                    fn.set_parent(self.respondable)
-                    pose = part.get_pose(relative_to=self.respondable)
-                    fn.set_pose(pose, relative_to=self.respondable)
-                    fn.set_assembled(True)
-                    self.used_fn.append(fn)
-                    break
-            if not is_exist:
-                return False
-        
-        return True
-
-    def release(self):
-        for fn in self.used_fn:
-            fn.set_assembled(False)
-        self.used_fn = []
-
-    def set_dynamic(self, is_dynamic):
-        self.respondable.set_dynamic(is_dynamic)
-
-    def deactivate(self):
-        self.respondable.set_respondable(False)
-        self.release()
-
-    def reset(self):
-        self.respondable.set_pose(self._initial_pose)   
-
-    def activate(self, furnitures):
-        if self._catch_fn_parts(furnitures):
-            self.respondable.set_respondable(True)
             return True
-        else:
-            return False
-        
-class RobotManager(object):
-    def __init__(self, gripper_robot_num=1, no_gripper_num=2):
-        self.robots = [MyPanda(i) for i in range(gripper_robot_num)]
-        self.robots += [MyPanda(i, is_gripper=False) for i in range(no_gripper_num)]
-        self.visible = []
-        for robot in self.robots:
-            self.visible += robot.get_visible_objects()
-        for i, robot in enumerate(self.robots[gripper_robot_num:]):
-            hand_name = "panda_hand_visual#" + str(i)
-            finger_name = "panda_finger_visual#" + str(i)
-            visible_grasp = [Shape(hand_name), Shape(finger_name)]
-            self.visible += visible_grasp
-        self.respondable = []
-        for robot in self.robots:
-            self.respondable += robot.get_respondable_objects()
 
-    def set_seg_objects(self, seg_objects):
-        self.seg_objects = seg_objects
-        
-    def set_seg_state(self, is_seg):
-        for seg in self.seg_objects:
-            seg.set_renderable(is_seg)
-        for vis in self.visible:
-            vis.set_renderable(not is_seg)
+    def randomize_robot_ee_pose(self):
+        robot = self.robot_manager.robots[2]
+        robot.randomize_ee_pose(self.pr)
 
-    def randomize_pose(self):
-        for robot in self.robots:
-            robot.set_random_pose()
+    def release_furniture(self):
+        self.grasp_furniture.set_parent(None)
+        self.grasp_furniture.set_respondable(False)
+        self.grasp_furniture.reset()
 
-    def randomize_ee_pose(self, pr):
-        for robot in self.robots:
-            random_position = robot.get_random_ee_pose()
-            random_orientation = np.random.rand(3) * np.pi
-            robot.move_to_target_pose(pr, target_position=random_position,
-                                      )#target_orientation=random_orientation)
-
-    def reset(self):
-        for robot in self.robots:
-            robot.reset()
-
-class TextureManager(object):
-    def __init__(self, process_id, pr):
-        self.process_id = process_id
-        self.pr = pr
-        self._color_variance = 0.05
-        self.texture_shapes = []
-        self.textures = self._load_texture_files()
-        
-    def _get_random_color(self, refer=None):
-        """[get random color]
-        
-        Keyword Arguments:
-            refer {[list(3)(0-1)]} -- [reference color] (default: {None})
-        """
-        if not type(refer) == list: # no reference color
-            return list(np.random.rand(3))
-        else:
-            reference_color = np.array(refer)
-            color_min = np.clip(reference_color - self._color_variance, 0,1) 
-            color_max = np.clip(reference_color + self._color_variance, 0,1)
-            random_color = list(np.random.uniform(color_min, color_max))
-            return random_color        
-    
-    def _load_texture_files(self):
-        textures = {}
-        for p in TextureType:
-            textures[p.name] = get_file_list(p.value)
-
-        return textures
-
-    def _get_random_texture(self, texture_type):
-        texture_path = random.choice(self.textures[texture_type.name])
-
-        return texture_path
-
-    def _create_texture(self, texture_path):
-        try:
-            shape, texture = self.pr.create_texture(filename=texture_path)
-        except:
-            return False
-        shape.set_detectable(False)
-        shape.set_renderable(False)
-        self.texture_shapes.append(shape)
-
-        return texture
-    
-    def _get_mixed_randomized_teuxture(self, texture_type):
-        num_h = random.randint(1, 3)
-        num_w = random.randint(1, 3)
-        mix_texture = []
-        for h in range(num_h):
-            mix_row = [list(cv2.imread(self._get_random_texture(texture_type))) for w in range(num_w)]
-            mix_row = np.hstack(mix_row)
-            mix_texture.append(mix_row)
-        mix_texture = np.vstack(mix_texture)
-        save_path = os.path.join(TextureType.mixed_texture.value, 'mix_texture_' + str(self.process_id) + '.png')
-        cv2.imwrite(save_path, mix_texture)
-        return save_path
-
-    def _get_grad_randomized_texture(self, texture_path, refer):
-        """create randomize texture in scene
-        1. get random gray texture from texture file list
-        2. get two random color(can be refer)
-        3. create gradation texture image
-        4. create texture shape(in the scene) 
-        
-        Keyword Arguments:
-            refer {[type]} -- [description] (default: {None})
-        
-        Returns:
-            [type] -- [description]
-        """
-        #region create gradient randomize texture
-        first_color = self._get_random_color(refer=refer)
-        if refer==None:
-            refer = list(1 - np.array(first_color)) # complement color
-        second_color = self._get_random_color(refer=refer)
-        rand_texture_path = create_randomize_image(texture_path,
-                                              first_color,
-                                              second_color,
-                                              self.process_id)        
-        while not type(rand_texture_path) == str:
-            print("[ERROR] {} texture occur error!".format(texture_path))
-            texture_path = self._get_random_gray_texture()
-            first_color = self._get_random_color(refer=refer)
-            second_color = self._get_random_color(refer=refer)
-            rand_texture_path = create_randomize_image(texture_path,
-                                                first_color,
-                                                second_color,
-                                                self.process_id)        
-        #endregion
-             
-        return rand_texture_path
-    
-    def get_randomize_texture(self, texture_type, refer=None):
-        if texture_type == TextureType.gray_texture:
-            rand_texture_path = self._get_random_texture(texture_type)
-            rand_texture_path = self._get_grad_randomized_texture(rand_texture_path, refer=refer)
-        elif texture_type == TextureType.mixed_texture:
-            rand_texture_path = self._get_mixed_randomized_teuxture(TextureType.crawled_texture)
-        else:
-            rand_texture_path = self._get_random_texture(texture_type)
-
-        texture = False
-        while type(texture) == bool:
-            texture = self._create_texture(rand_texture_path)
-
-        return texture
-    
-    def _set_random_texture(self, obj_visible, texture):
-        mapping_ind = np.random.randint(4)
-        uv_scale = list(np.random.uniform((0, 0), (5, 5)))
-        if not type(obj_visible) == list:    
-            obj_visible.set_texture(texture=texture,
-                                    mapping_mode=TextureMappingMode(mapping_ind),
-                                    uv_scaling=uv_scale,
-                                    repeat_along_u=True,
-                                    repeat_along_v=True)  
-        else:
-            for vis in obj_visible:
-                vis.set_texture(texture=texture,
-                                mapping_mode=TextureMappingMode(mapping_ind),
-                                uv_scaling=uv_scale,
-                                repeat_along_u=True,
-                                repeat_along_v=True)  
-
-    def set_random_texture(self, obj_visible, texture_type: TextureType, refer=None):
-        texture = self.get_randomize_texture(texture_type, refer=refer)
-        self._set_random_texture(obj_visible, texture)
-    
-    def reset(self):
-        for sh in self.texture_shapes:
-            sh.remove()
-        self.texture_shapes = []
-
-class LabelingManager(object):
-    def __init__(self, class_num, RGB=-1):
-        self.class_num = class_num
-        self.color_range = 255 / self.class_num
-        self.class_colors = []
-        for class_id in range(self.class_num): # 5
-            rgb_min = [0, 0, 0]
-            rgb_max = [0, 0, 0]
-            if RGB == -1:
-                rgb_min = [self.color_range * class_id + 1, self.color_range * class_id + 1 , self.color_range * class_id + 1] 
-                rgb_max = [self.color_range * (class_id + 1), self.color_range * (class_id + 1), self.color_range * (class_id + 1)]
-            else:
-                rgb_min[RGB] = self.color_range * class_id + 1
-                rgb_max[RGB] = self.color_range * (class_id + 1)
-
-            self.class_colors.append((rgb_min, rgb_max))
-        
-        self.used_colors = []
-
-    def get_class_color(self, class_id):
-        color_range = self.class_colors[class_id]
-        rgb_low = color_range[0]
-        rgb_max = color_range[1]
-        seg_color = np.uint8(np.random.uniform(rgb_low, rgb_max)) # 0 ~ 255
-        seg_color = tuple(seg_color)
-        while seg_color in self.used_colors:
-            seg_color = np.uint8(np.random.uniform(rgb_low, rgb_max))
-            seg_color = tuple(seg_color)
-        self.used_colors.append(seg_color)
-
-        return seg_color
-    
-    @staticmethod
-    def create_segmented_object(obj_visibles, seg_texture, pr):
-        seg_objects = []
-        if not type(obj_visibles) == list:
-            obj_visibles = [obj_visibles]
-        for obj_visible in obj_visibles:
-            seg_object = obj_visible.copy()
-            seg_object.set_color([1, 1, 1])
-            try:
-                seg_object.remove_texture()
-            except:
-                pass
-            seg_object.set_texture(texture=seg_texture,
-                                decal_mode=True,
-                                mapping_mode=TextureMappingMode(3),
-                                uv_scaling=[1, 1],
-                                repeat_along_u=True,
-                                repeat_along_v=True,
-                                )
-            seg_object.set_renderable(False)
-            seg_object.set_parent(obj_visible)
-            seg_objects.append(seg_object)
-        pr.step()
-        if len(seg_objects) == 1:
-            return seg_objects[0]
-        else:
-            return seg_objects
-
-    def set_seg_state(self, seg):
-        for seg_obj in self.seg_objects:
-            seg_obj.set_renderable(seg)
-
-    def reset(self):
-        self.used_colors = []

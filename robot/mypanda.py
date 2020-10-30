@@ -19,6 +19,9 @@ class MyPanda(object):
         self.initial_joint_positions = self.arm.get_joint_positions()
         self.visible_parts = self._extract_visible_parts()
         self.respondable_parts = self._extract_respondable_parts()
+        print("instance:", instance, "--"*10)
+        for p in self.respondable_parts:
+            print(p.get_name())
 
         self.workspace = self.get_workspace()
 
@@ -35,10 +38,15 @@ class MyPanda(object):
     def get_random_ee_pose(self):
         return np.random.uniform(self.workspace[0], self.workspace[1])
 
-    def get_random_pose(self):
+    def get_random_pose(self, relative=False):
         dif = np.ones(7)*0.5
-        return list(np.random.uniform(self.initial_joint_positions - dif,
-                                                         self.initial_joint_positions + dif))
+        if not relative:
+            return list(np.random.uniform(self.initial_joint_positions - dif,
+                                          self.initial_joint_positions + dif))
+        else:
+            current_joint_positions = self.arm.get_joint_positions()
+            return list(np.random.uniform(current_joint_positions - dif,
+                                          current_joint_positions + dif))
 
     def _extract_visible_parts(self):
         visible_parts = []
@@ -68,9 +76,9 @@ class MyPanda(object):
         return list(np.random.uniform(self.initial_position - dif,
                                       self.initial_position + dif))
 
-    def set_random_pose(self):
+    def set_random_pose(self, relative=False):
         self.arm.set_position(self.get_random_xy_position())
-        self.arm.set_joint_positions(self.get_random_pose())
+        self.arm.set_joint_positions(self.get_random_pose(relative))
 
     def get_visible_objects(self):
         
@@ -85,7 +93,7 @@ class MyPanda(object):
     def grasp(self):
         return self.gripper.actuate(0, 0.1)
     
-    def _get_ee_pose(self):
+    def get_ee_pose(self):
         return self.ee_tip.get_pose()
 
     def _get_waypoints(self, target_position: list, target_orientation: list, num_pts: int):
@@ -135,5 +143,15 @@ class MyPanda(object):
             if not reach_state:
                 count += 1
 
+    def randomize_ee_pose(self, pr):
+        target_position = list(np.array(self.grasp_base_position) + (np.random.rand(3) - 0.5) / 10)
+        target_position[2] += 0.05 
+        target_orientation = list(np.array(self.grasp_base_orientation) + (np.random.rand(3) - 0.5) / 10)
+        self.move_to_target_pose(pr, target_position=target_position, target_orientation=target_orientation)
+
     def reset(self):
         self.arm.set_joint_positions(self.initial_joint_positions)
+
+    def set_grasp_base_pose(self):
+        self.grasp_base_position = self.ee_tip.get_position()
+        self.grasp_base_orientation = self.ee_tip.get_orientation()

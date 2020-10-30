@@ -10,9 +10,12 @@ import argparse
 import pickle
 import logging
 
-from environment import DREnv, TableTextureType, WoodTextureType
+from environment import DREnv
+from const import *
 from externApi.fileApi import *
 import random
+import warnings
+warnings.filterwarnings('error')
 
 class Generator(object):
 
@@ -36,7 +39,8 @@ class Generator(object):
                          headless=headless,
                          dataset_ver=dataset_ver,
                          process_id=process_id)
-        
+        self.dataset_ver = dataset_ver
+
         # data generate setting        
         self.img_max = max_img_num
         self.img_num = 0
@@ -71,6 +75,15 @@ class Generator(object):
                                                                  self.table_texture.name,
                                                                  self.wood_texture.name,
                                                                  timestamp)
+
+    def _set_img_name_grasp(self):
+        now = datetime.now()
+        timestamp = datetime.timestamp(now)
+        self.img_name = "{}_{}_{}_and_{}_time{}.png".format(self.camera_location.name,
+                                                            self.view_type.name,
+                                                            self.table_texture.name,
+                                                            self.wood_texture.name,
+                                                            timestamp)
 
     def _is_ended(self):
         if self.img_num < self.img_max:
@@ -126,6 +139,32 @@ class Generator(object):
         
         except FileNotFoundError:
             self.logger.error("No save directory")
+    
+    def save_image_grasp(self):
+        rgb_image, depth_raw, seg, hole_mask, _ = self.env.get_images()
+
+        self._set_img_name_grasp()
+        np_name = self.img_name.replace(".png", ".npy") # save numpy 
+        seg_new = np.uint8(seg * 255)
+        rgb_image = Image.fromarray(np.uint8(rgb_image * 255))        
+        depth_value = np.uint16(depth_raw * self.uint16_conversion)
+        seg = Image.fromarray(np.uint8(seg * 255))
+        hole_mask = Image.fromarray(hole_mask)
+
+        self.logger.debug("start to save image")        
+        check_and_create_dir(join(self.rgb_dir, self.furniture_name))
+        try:
+            rgb_image.save(join(self.rgb_dir, self.furniture_name, self.img_name))
+            self.logger.debug("save rgb")
+            np.save(join(self.depth_dir, np_name), depth_value)
+            self.logger.debug("save_depth")
+            seg.save(join(self.seg_dir, self.img_name))
+            self.logger.debug("save seg")
+            hole_mask.save(join(self.hmask_dir, self.img_name))
+            self.logger.debug("save mask")
+            
+        except FileNotFoundError:
+            self.logger.error("No save directory")
 
     def run_episode(self):
         """randomize part
@@ -152,18 +191,76 @@ class Generator(object):
         self.table_texture = random.choice(list(TableTextureType))
         self.wood_texture = random.choice(list(WoodTextureType))
         self.env.reset(assembly_num, furniture_num, self.table_texture, self.wood_texture)
+        self.env.camera_manager.set_activate(True)
         for i in range(self.ep_length):
             self.env.step()
-            # self.env.test_align()
-            self.save_image()
-            self.logger.info(f"successfully saved image: {self.img_name}")
-            self.img_num += 1
-            # self.env.ep_idx += 1
+            
+            for self.camera_location in CameraLocation:
+                self.view_type = CameraViewType.workspace
+                self.env.randomize_camera(view_type=self.view_type,
+                                          location=self.camera_location)
+                
+                self.save_image()
+                self.logger.info(f"successfully saved image: {self.img_name}")
+                self.img_num += 1
+        self.env.camera_manager.set_activate(False)
+
+    def run_grasp_episode(self):
+        """
+        only primitive part
+        
+        """
+        self.furniture_num = np.random.randint(1, 7)
+        self.assembly_num = 0
+        self.table_texture = random.choice(list(TableTextureType))
+        self.wood_texture = random.choice(list(WoodTextureType))
+        self.env.reset(self.assembly_num, self.furniture_num, self.table_texture, self.wood_texture)
+        for i in range(self.ep_length):
+            # 1. move robot to grasp pose
+            # 2. pick furniture and grasp it
+            while not self.env.grasp_random_furniture():
+                continue
+            self.furniture_name = self.env.grasp_furniture.name
+            self.env.camera_manager.set_activate(True)
+            for j in range(5):
+                # 3. move
+                self.env.randomize_robot_ee_pose()
+                # case 1. left and see grasp space
+                self.camera_location = CameraLocation.left
+                self.view_type = CameraViewType.graspspace
+                self.env.randomize_camera(view_type=self.view_type,
+                                          location=self.camera_location)
+                self.save_image_grasp()
+                self.logger.info(f"successfully saved image: {self.img_name}")
+                # case 2. top and see grasp space
+                self.camera_location = CameraLocation.top
+                self.view_type = CameraViewType.graspspace
+                self.env.randomize_camera(view_type=self.view_type,
+                                          location=self.camera_location)
+                self.save_image_grasp()
+                self.logger.info(f"successfully saved image: {self.img_name}")
+                # case 3. top and see work space
+                self.camera_location = CameraLocation.top
+                self.view_type = CameraViewType.graspspace
+                self.env.randomize_camera(view_type=self.view_type,
+                                          location=self.camera_location)
+                self.save_image_grasp()
+                self.logger.info(f"successfully saved image: {self.img_name}")
+
+                self.img_num += 1
+            self.env.release_furniture()
+            self.env.camera_manager.set_activate(False)
 
     def start(self):
         while not self._is_ended(): 
-            self.run_episode()
+            if self.dataset_ver == 23:
+                self.run_grasp_episode()
+            else:
+                self.run_episode()
             self.ep_num += 1            
+        self.env.shutdown()
+    
+    def stop(self):
         self.env.shutdown()
 
 if __name__ =="__main__":
@@ -179,7 +276,7 @@ if __name__ =="__main__":
     # parser.add_argument("--save_root", type=str, default="/SSD1/joo/Dataset/furniture", help="saving directory root")
     parser.add_argument("--save_root", type=str, default="/home/raeyo/data_set", help="saving directory root")
     
-    parser.add_argument("--dataset_ver", type=int, default=23, help="saving directory")
+    parser.add_argument("--dataset_ver", type=int, default=24, help="saving directory")
     args = parser.parse_args()
 
     # logger
@@ -206,4 +303,8 @@ if __name__ =="__main__":
                           process_id=args.pid,
                           ) 
     start_time1 = time.time()
-    generator.start()
+    try:
+        generator.start()
+    except RuntimeWarning:
+        print("[ERROR] stop simulation")
+        generator.stop()
